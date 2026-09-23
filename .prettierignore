@@ -1,0 +1,20 @@
+# Dependencies / build output
+node_modules/
+.next/
+coverage/
+*.tsbuildinfo
+
+# Generated Prisma client
+src/generated/
+
+# Lockfile (tool-formatted, not project-authored)
+package-lock.json
+
+# Vendor / tool-managed documentation (do not reformat)
+.agents/
+.claude/
+.windsurf/
+skills-lock.json
+
+# Hand-authored prose: formatting docs is cosmetic churn (AGENTS.md §10).
+**/*.md

@@ -39,3 +39,12 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+/src/generated/prisma
+
+# Keep the environment template in Git
+!.env.example
+
+# agent tooling (not part of the project)
+.claude/
+.windsurf/

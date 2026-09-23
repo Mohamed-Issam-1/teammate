@@ -1,0 +1,37 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: teammate-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: teammate
+      POSTGRES_USER: teammate
+      POSTGRES_PASSWORD: teammate
+    ports:
+      - "5432:5432"
+    volumes:
+      - teammate_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U teammate -d teammate"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: teammate-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - teammate_redis_data:/data
+    command: ["redis-server", "--appendonly", "yes"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  teammate_postgres_data:
+  teammate_redis_data:

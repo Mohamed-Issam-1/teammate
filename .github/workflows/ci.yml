@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    env:
+      # Non-secret dummy value. Required before `npm ci` because postinstall
+      # runs `prisma generate`, which loads Prisma configuration/env.
+      # No CI step connects to this address: there is deliberately no
+      # database service in this workflow (Phase 0 scope).
+      DATABASE_URL: postgresql://teammate:teammate@localhost:5432/teammate
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 24 (npm cache)
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      # postinstall runs `prisma generate`, so no separate generate step.
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Validate Prisma schema
+        run: npx prisma validate
+
+      - name: Check formatting
+        run: npm run format:check
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm run test
+
+      - name: Build
+        run: npm run build
+
+      - name: Dependency audit (blocking)
+        run: npm audit --audit-level=high
