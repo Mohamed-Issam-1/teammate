@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   checks:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     env:
       # Non-secret dummy value. Required before `npm ci` because postinstall
       # runs `prisma generate`, which loads Prisma configuration/env.

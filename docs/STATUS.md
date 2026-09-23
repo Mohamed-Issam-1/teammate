@@ -4,7 +4,7 @@
 
 **Phase 0 — Foundation**
 
-Status: implementation complete (Checkpoints 1–3). All quality gates pass locally. First hosted CI run pending an approved push.
+Status: Phase 0 complete. All local quality gates and hosted GitHub Actions CI pass on `main`.
 
 ## Completed
 
@@ -37,9 +37,9 @@ Quality and tooling:
 - GitHub Actions CI configuration (`.github/workflows/ci.yml`) targeting `main`.
 - Local branch renamed `master` → `main` (W7).
 
-## Deferred / pending external
+## Deferred / upcoming work
 
-- CI workflow exists, but the first hosted GitHub run is pending: pushing is explicitly forbidden until user approval.
+- Hosted GitHub Actions CI has been verified successfully on `main`; the full CI pipeline passes on a GitHub-hosted runner.
 - Playwright E2E remains Phase 1: `test:e2e` is intentionally inactive until then.
 - Protected app shell remains Phase 1.
 - Project folders are created on first real use, not as empty speculative directories.
@@ -72,4 +72,4 @@ These decisions do not block Phase 0.
 
 ## Last update
 
-Checkpoint 3: branch renamed to `main`, CI workflow added, documentation synchronized, approved cleanup applied.
+Phase 0 complete: branch is `main`, hosted GitHub Actions CI verified successfully, documentation synchronized, and approved cleanup applied.
