@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { safeAuthLogger } from "@/server/auth/logger";
 import { createAuthOptions } from "@/server/auth/options";
 
 const noopEmailOperation = async (): Promise<void> => {};
@@ -15,11 +16,13 @@ function options() {
 }
 
 describe("createAuthOptions", () => {
-  it("uses one exact local trusted origin without proxy-topology overrides", () => {
+  it("uses one exact local trusted origin and the safe logger", () => {
     const authOptions = options();
 
     expect(authOptions.baseURL).toBe("http://localhost:3000");
     expect(authOptions.trustedOrigins).toEqual(["http://localhost:3000"]);
+    expect(authOptions.logger).toBe(safeAuthLogger);
+    expect(authOptions.onAPIError).toEqual({ throw: true });
     expect(authOptions).not.toHaveProperty("advanced");
   });
 
@@ -42,6 +45,12 @@ describe("createAuthOptions", () => {
     });
   });
 
+  it("stores verification identifiers as one-way hashes", () => {
+    expect(options().verification).toEqual({
+      storeIdentifier: "hashed",
+    });
+  });
+
   it("uses database storage for the built-in rate limiter", () => {
     expect(options().rateLimit).toMatchObject({
       enabled: true,
@@ -57,6 +66,9 @@ describe("createAuthOptions", () => {
   it("keeps identity fields server-owned and does not enable admin plugin", () => {
     const authOptions = options();
 
+    expect(authOptions.databaseHooks?.session?.create?.before).toBeTypeOf(
+      "function",
+    );
     expect(authOptions.user?.additionalFields?.globalRole).toMatchObject({
       type: ["USER", "ADMIN"],
       required: true,

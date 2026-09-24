@@ -2,17 +2,28 @@ import "server-only";
 
 import type { AuthEmailOperations } from "@/server/auth/options";
 
-/**
- * Checkpoint 1 email boundary.
- *
- * Better Auth needs semantic verification/reset operations to instantiate its
- * configuration. Real delivery is intentionally deferred: no provider SDK,
- * mailbox route, template system, URL logging, or token logging is included.
- */
+import { InMemoryDevelopmentEmailTransport } from "./development";
 
-const noopEmailOperation = async (): Promise<void> => {};
+const developmentEmail = new InMemoryDevelopmentEmailTransport();
 
-export const authEmail: AuthEmailOperations = {
-  sendVerificationEmail: noopEmailOperation,
-  sendPasswordResetEmail: noopEmailOperation,
+const unavailableProductionEmail: AuthEmailOperations = {
+  sendVerificationEmail: async () => {
+    throw new Error("Auth email delivery is not configured");
+  },
+  sendPasswordResetEmail: async () => {
+    throw new Error("Auth email delivery is not configured");
+  },
 };
+
+/**
+ * Development/test email boundary.
+ *
+ * Development messages are retained only in bounded, short-lived process
+ * memory. Integration tests inject an isolated in-process capture; neither path
+ * exposes a mailbox route, persists to disk, or logs URLs/tokens. Production
+ * fails closed until a reviewed provider adapter is introduced.
+ */
+export const authEmail: AuthEmailOperations =
+  process.env.NODE_ENV === "production"
+    ? unavailableProductionEmail
+    : developmentEmail;

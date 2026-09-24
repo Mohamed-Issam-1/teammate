@@ -12,6 +12,7 @@
     "lint": "eslint",
     "typecheck": "next typegen && tsc --noEmit",
     "test": "vitest run",
+    "test:integration": "tsx scripts/run-auth-integration-tests.ts",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
     "db:check": "tsx scripts/db-check.ts",

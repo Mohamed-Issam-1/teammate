@@ -3,6 +3,7 @@ import "server-only";
 import { headers } from "next/headers";
 
 import { auth } from "./index";
+import { getActiveSession, requireActiveVerifiedSession } from "./policy";
 
 /**
  * Return the current active server session.
@@ -20,23 +21,9 @@ export async function getServerSession() {
     },
   });
 
-  if (!session || session.user.accountStatus !== "ACTIVE") {
-    return null;
-  }
-
-  return session;
+  return getActiveSession(session);
 }
 
 export async function requireServerSession() {
-  const session = await getServerSession();
-
-  if (!session) {
-    throw new Error("Authentication required");
-  }
-
-  if (!session.user.emailVerified) {
-    throw new Error("Email verification required");
-  }
-
-  return session;
+  return requireActiveVerifiedSession(await getServerSession());
 }

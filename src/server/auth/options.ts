@@ -1,4 +1,7 @@
+import { APIError } from "better-auth/api";
 import type { BetterAuthOptions } from "better-auth";
+
+import { safeAuthLogger } from "./logger";
 
 /**
  * CLI-safe Better Auth options.
@@ -24,6 +27,45 @@ export type AuthOptionsInput = {
   email: AuthEmailOperations;
 };
 
+type UserLookup = (userId: string) => Promise<unknown>;
+
+function sessionCreationError(): APIError {
+  return APIError.from("FORBIDDEN", {
+    code: "SESSION_CREATION_NOT_ALLOWED",
+    message: "Session could not be created.",
+  });
+}
+
+function isKnownActiveUser(user: unknown): boolean {
+  return (
+    typeof user === "object" &&
+    user !== null &&
+    "accountStatus" in user &&
+    user.accountStatus === "ACTIVE"
+  );
+}
+
+/**
+ * Require an authoritative ACTIVE-user lookup before Better Auth persists a
+ * session. All uncertainty is deliberately collapsed into one generic error so
+ * database failures and account-state details cannot reach the public response.
+ */
+export async function requireActiveUserForSessionCreation(
+  userId: string,
+  findUserById: UserLookup,
+): Promise<void> {
+  try {
+    const user = await findUserById(userId);
+    if (isKnownActiveUser(user)) {
+      return;
+    }
+  } catch {
+    // Fail closed without logging a raw framework or database exception.
+  }
+
+  throw sessionCreationError();
+}
+
 /**
  * Build the Better Auth options shared by the CLI and runtime entrypoints.
  * The runtime entry supplies the secret and Prisma adapter separately.
@@ -35,12 +77,19 @@ export function createAuthOptions({ baseURL, email }: AuthOptionsInput) {
     appName: "TeamMate",
     baseURL,
     trustedOrigins: [trustedOrigin],
+    logger: safeAuthLogger,
+    onAPIError: {
+      throw: true,
+    },
     emailAndPassword: {
       enabled: true,
       requireEmailVerification: true,
       autoSignIn: false,
       minPasswordLength: 8,
       maxPasswordLength: 128,
+      // Better Auth 1.7.5 does not guarantee one transaction spanning token
+      // consumption, password update, and session revocation. Phase 1 accepts
+      // this native-flow limitation as an upstream residual risk.
       resetPasswordTokenExpiresIn: 3600,
       revokeSessionsOnPasswordReset: true,
       sendResetPassword: async ({ user, url }) => {
@@ -61,6 +110,9 @@ export function createAuthOptions({ baseURL, email }: AuthOptionsInput) {
         });
       },
     },
+    verification: {
+      storeIdentifier: "hashed",
+    },
     rateLimit: {
       enabled: true,
       storage: "database",
@@ -69,6 +121,23 @@ export function createAuthOptions({ baseURL, email }: AuthOptionsInput) {
     session: {
       cookieCache: {
         enabled: false,
+      },
+    },
+    databaseHooks: {
+      session: {
+        create: {
+          before: async (session, endpointContext) => {
+            if (!endpointContext) {
+              throw sessionCreationError();
+            }
+
+            await requireActiveUserForSessionCreation(
+              session.userId,
+              (userId) =>
+                endpointContext.context.internalAdapter.findUserById(userId),
+            );
+          },
+        },
       },
     },
     user: {
