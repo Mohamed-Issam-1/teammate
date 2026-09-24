@@ -1,20 +1,19 @@
 import { z } from "zod";
 
 /**
- * Phase 0 environment contract.
+ * Environment parsing is split into two contracts:
  *
- * Pure parsing/validation only: no `process.env` access and no `server-only`
- * marker, so this module stays unit-testable and can be imported by
- * standalone scripts (for example `scripts/db-check.ts` running under tsx,
- * where `server-only` would throw).
+ * - `parseEnv` preserves the Phase 0 database-only contract used by
+ *   `scripts/db-check.ts` and other non-auth runtime checks.
+ * - `parseAuthEnv` adds the server-only Better Auth requirements for the auth
+ *   runtime and CLI configuration boundary.
  *
- * Rules:
- * - only variables required by the current phase fail fast;
- * - empty strings are treated as unset (matches `.env.example` placeholders);
- * - error messages name variables only and never include values.
+ * Both functions are pure with respect to the supplied record, treat empty
+ * strings as unset, and never include environment values in error messages.
  */
 
 const NODE_ENV_VALUES = ["development", "test", "production"] as const;
+const INSECURE_SECRET_PLACEHOLDER = "replace-with-a-long-random-secret";
 
 function isAbsoluteHttpUrl(value: string): boolean {
   try {
@@ -29,13 +28,30 @@ function isPostgresConnectionString(value: string): boolean {
   return value.startsWith("postgresql://") || value.startsWith("postgres://");
 }
 
-const envSchema = z.object({
-  // Required by Phase 0 runtime behavior.
+function normalizeEnv(
+  raw: Record<string, string | undefined>,
+): Record<string, string | undefined> {
+  const normalized: Record<string, string | undefined> = {};
+  for (const [key, value] of Object.entries(raw)) {
+    normalized[key] = value === undefined || value === "" ? undefined : value;
+  }
+  return normalized;
+}
+
+function formatIssues(error: z.ZodError): string {
+  return error.issues
+    .map((issue) => {
+      const name =
+        issue.path.length > 0 ? String(issue.path[0]) : "environment";
+      return `${name}: ${issue.message}`;
+    })
+    .join("; ");
+}
+
+const baseEnvSchema = z.object({
   DATABASE_URL: z.string().refine(isPostgresConnectionString, {
     message: "DATABASE_URL must be a postgresql:// connection string",
   }),
-
-  // Validated when present, but not required.
   NODE_ENV: z
     .string()
     .optional()
@@ -47,63 +63,99 @@ const envSchema = z.object({
         message: `NODE_ENV must be one of: ${NODE_ENV_VALUES.join(", ")}`,
       },
     ),
-  // Kept optional: Phase 0 has no genuine need for an absolute app URL.
   NEXT_PUBLIC_APP_URL: z
     .string()
     .optional()
     .refine((value) => value === undefined || isAbsoluteHttpUrl(value), {
       message: "NEXT_PUBLIC_APP_URL must be an absolute http(s) URL",
     }),
-
-  // Declared but never enforced until the owning phase.
-  BETTER_AUTH_SECRET: z.string().optional(), // Phase 1
-  BETTER_AUTH_URL: z.string().optional(), // Phase 1
-  RESEND_API_KEY: z.string().optional(), // Phase 1+ email
-  EMAIL_FROM: z.string().optional(), // Phase 1+ email
-  REDIS_URL: z.string().optional(), // Phase 6
-  S3_ENDPOINT: z.string().optional(), // Phase 5
-  S3_REGION: z.string().optional(), // Phase 5
-  S3_BUCKET: z.string().optional(), // Phase 5
-  S3_ACCESS_KEY_ID: z.string().optional(), // Phase 5
-  S3_SECRET_ACCESS_KEY: z.string().optional(), // Phase 5
-  S3_PUBLIC_BASE_URL: z.string().optional(), // Phase 5
-  OPENAI_API_KEY: z.string().optional(), // Phase 6
-  SENTRY_DSN: z.string().optional(), // Phase 8
-  NEXT_PUBLIC_SENTRY_DSN: z.string().optional(), // Phase 8
 });
 
-export type Env = z.infer<typeof envSchema>;
+export type Env = z.infer<typeof baseEnvSchema>;
 
-/** Variables that must exist for the current phase to run. */
-const REQUIRED_KEYS = ["DATABASE_URL"] as const;
+const authEnvSchema = z.object({
+  DATABASE_URL: z.string().refine(isPostgresConnectionString, {
+    message: "DATABASE_URL must be a postgresql:// connection string",
+  }),
+  NODE_ENV: z
+    .string()
+    .optional()
+    .refine(
+      (value) =>
+        value === undefined ||
+        (NODE_ENV_VALUES as readonly string[]).includes(value),
+      {
+        message: `NODE_ENV must be one of: ${NODE_ENV_VALUES.join(", ")}`,
+      },
+    ),
+  BETTER_AUTH_SECRET: z
+    .string()
+    .min(32, "BETTER_AUTH_SECRET must be at least 32 characters")
+    .refine((value) => value !== INSECURE_SECRET_PLACEHOLDER, {
+      message: "BETTER_AUTH_SECRET must not use the example placeholder",
+    }),
+  BETTER_AUTH_URL: z.string().refine(isAbsoluteHttpUrl, {
+    message: "BETTER_AUTH_URL must be an absolute http(s) URL",
+  }),
+});
+
+export type AuthEnv = z.infer<typeof authEnvSchema>;
+
+const BASE_REQUIRED_KEYS = ["DATABASE_URL"] as const;
+const AUTH_REQUIRED_KEYS = [
+  "DATABASE_URL",
+  "BETTER_AUTH_SECRET",
+  "BETTER_AUTH_URL",
+] as const;
+
+function missingMessage(keys: readonly string[]): string {
+  return `Missing required environment variables: ${keys.join(", ")}`;
+}
 
 /**
- * Validate an environment record.
+ * Validate the Phase 0 database-only environment contract.
  *
- * @throws {Error} naming offending variables only; values are never included
- * in the message.
+ * @throws {Error} naming offending variables only; values are never included.
  */
 export function parseEnv(raw: Record<string, string | undefined>): Env {
-  const normalized: Record<string, string | undefined> = {};
-  for (const [key, value] of Object.entries(raw)) {
-    normalized[key] = value === undefined || value === "" ? undefined : value;
+  const normalized = normalizeEnv(raw);
+  const missing = BASE_REQUIRED_KEYS.filter(
+    (key) => normalized[key] === undefined,
+  );
+  if (missing.length > 0) {
+    throw new Error(missingMessage(missing));
   }
 
-  const missing = REQUIRED_KEYS.filter((key) => normalized[key] === undefined);
-  if (missing.length > 0) {
+  const result = baseEnvSchema.safeParse(normalized);
+  if (!result.success) {
     throw new Error(
-      `Missing required environment variables: ${missing.join(", ")}`,
+      `Invalid environment variables - ${formatIssues(result.error)}`,
     );
   }
 
-  const result = envSchema.safeParse(normalized);
+  return result.data;
+}
+
+/**
+ * Validate the server-only Better Auth environment contract.
+ *
+ * This is intentionally separate from `parseEnv` so `db:check` does not
+ * require auth secrets or URLs.
+ */
+export function parseAuthEnv(raw: Record<string, string | undefined>): AuthEnv {
+  const normalized = normalizeEnv(raw);
+  const missing = AUTH_REQUIRED_KEYS.filter(
+    (key) => normalized[key] === undefined,
+  );
+  if (missing.length > 0) {
+    throw new Error(missingMessage(missing));
+  }
+
+  const result = authEnvSchema.safeParse(normalized);
   if (!result.success) {
-    const details = result.error.issues.map((issue) => {
-      const name =
-        issue.path.length > 0 ? String(issue.path[0]) : "environment";
-      return `${name}: ${issue.message}`;
-    });
-    throw new Error(`Invalid environment variables - ${details.join("; ")}`);
+    throw new Error(
+      `Invalid environment variables - ${formatIssues(result.error)}`,
+    );
   }
 
   return result.data;
