@@ -18,6 +18,8 @@ jobs:
       # No CI step connects to this address: there is deliberately no
       # database service in this workflow (Phase 0 scope).
       DATABASE_URL: postgresql://teammate:teammate@localhost:5432/teammate
+      BETTER_AUTH_URL: http://localhost:3000
+      BETTER_AUTH_SECRET: ci-only-dummy-better-auth-secret-0123456789abcdef
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -52,3 +54,4 @@ jobs:
 
       - name: Dependency audit (blocking)
         run: npm audit --audit-level=high
+
