@@ -3,7 +3,6 @@ import { redirect } from "next/navigation";
 
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { SignOutButton } from "@/features/auth/components/sign-out-button";
-import { OnboardingForm } from "@/features/onboarding/components/onboarding-form";
 import {
   AuthenticationRequiredError,
   EmailVerificationRequiredError,
@@ -11,11 +10,11 @@ import {
 import { getCurrentOnboardingState } from "@/server/profiles/current-onboarding";
 
 export const metadata: Metadata = {
-  title: "Account setup",
-  description: "Choose the display name you will use on TeamMate.",
+  title: "Account",
+  description: "Your TeamMate account is ready.",
 };
 
-export default async function OnboardingPage() {
+export default async function AppPage() {
   let state: Awaited<ReturnType<typeof getCurrentOnboardingState>>;
 
   try {
@@ -32,8 +31,8 @@ export default async function OnboardingPage() {
     throw error;
   }
 
-  if (state.onboardingComplete) {
-    redirect("/app");
+  if (!state.onboardingComplete) {
+    redirect("/onboarding");
   }
 
   return (
@@ -49,17 +48,16 @@ export default async function OnboardingPage() {
         <Card className="w-full max-w-lg shadow-sm">
           <CardHeader className="px-5 pt-5 sm:px-6 sm:pt-6">
             <p className="text-muted-foreground text-sm font-medium">
-              Account setup
+              Account ready
             </p>
             <h1 className="text-foreground mt-2 text-2xl font-semibold tracking-tight text-balance">
-              Choose your display name
+              Welcome, {state.displayName}
             </h1>
-            <p className="text-muted-foreground mt-2 text-sm leading-relaxed text-pretty">
-              This is the name you will use on TeamMate.
-            </p>
           </CardHeader>
           <CardContent className="px-5 pb-5 sm:px-6 sm:pb-6">
-            <OnboardingForm initialDisplayName={state.displayName} />
+            <p className="text-muted-foreground text-sm leading-relaxed">
+              Your TeamMate account is ready.
+            </p>
             <SignOutButton />
           </CardContent>
         </Card>

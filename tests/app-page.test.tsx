@@ -1,7 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import OnboardingPage from "@/app/onboarding/page";
+import AppPage from "@/app/app/page";
 import {
   AuthenticationRequiredError,
   EmailVerificationRequiredError,
@@ -18,12 +18,6 @@ const navigationMock = vi.hoisted(() => ({
 
 vi.mock("@/features/auth/client", () => ({
   authClient: { signOut: vi.fn() },
-}));
-
-vi.mock("@/features/onboarding/components/onboarding-form", () => ({
-  OnboardingForm: ({ initialDisplayName }: { initialDisplayName: string }) => (
-    <div data-testid="onboarding-form">{initialDisplayName}</div>
-  ),
 }));
 
 vi.mock("@/server/profiles/current-onboarding", () => onboardingMock);
@@ -43,53 +37,52 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-describe("onboarding protected entry boundary", () => {
-  it("redirects an unauthenticated request without exposing the form", async () => {
+describe("protected app entry boundary", () => {
+  it("redirects an unauthenticated request to sign-in", async () => {
     onboardingMock.getCurrentOnboardingState.mockRejectedValue(
       new AuthenticationRequiredError(),
     );
 
-    await expect(OnboardingPage()).rejects.toThrow("NEXT_REDIRECT:/sign-in");
+    await expect(AppPage()).rejects.toThrow("NEXT_REDIRECT:/sign-in");
     expect(navigationMock.redirect).toHaveBeenCalledWith("/sign-in");
   });
 
-  it("redirects an unverified request according to the existing auth policy", async () => {
+  it("redirects an unverified request to email verification", async () => {
     onboardingMock.getCurrentOnboardingState.mockRejectedValue(
       new EmailVerificationRequiredError(),
     );
 
-    await expect(OnboardingPage()).rejects.toThrow(
-      "NEXT_REDIRECT:/verify-email",
-    );
+    await expect(AppPage()).rejects.toThrow("NEXT_REDIRECT:/verify-email");
     expect(navigationMock.redirect).toHaveBeenCalledWith("/verify-email");
   });
 
-  it("renders the onboarding form for an active verified incomplete user", async () => {
+  it("redirects an active verified user with incomplete onboarding", async () => {
     onboardingMock.getCurrentOnboardingState.mockResolvedValue({
       displayName: "Bootstrap Name",
       onboardingComplete: false,
       profileExists: false,
     });
 
-    render(await OnboardingPage());
-
-    expect(
-      screen.getByRole("heading", { name: "Choose your display name" }),
-    ).toBeVisible();
-    expect(screen.getByTestId("onboarding-form")).toHaveTextContent(
-      "Bootstrap Name",
-    );
-    expect(screen.getByRole("button", { name: "Sign out" })).toBeEnabled();
+    await expect(AppPage()).rejects.toThrow("NEXT_REDIRECT:/onboarding");
+    expect(navigationMock.redirect).toHaveBeenCalledWith("/onboarding");
   });
 
-  it("redirects a completed user to the protected app entry", async () => {
+  it("renders the canonical Profile display name for a completed account", async () => {
     onboardingMock.getCurrentOnboardingState.mockResolvedValue({
       displayName: "Canonical Name",
       onboardingComplete: true,
       profileExists: true,
     });
 
-    await expect(OnboardingPage()).rejects.toThrow("NEXT_REDIRECT:/app");
-    expect(navigationMock.redirect).toHaveBeenCalledWith("/app");
+    render(await AppPage());
+
+    expect(
+      screen.getByRole("heading", { name: "Welcome, Canonical Name" }),
+    ).toBeVisible();
+    expect(screen.getByRole("button", { name: "Sign out" })).toBeEnabled();
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(/dashboard|projects|teams/i),
+    ).not.toBeInTheDocument();
   });
 });

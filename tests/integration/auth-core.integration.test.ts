@@ -5,9 +5,16 @@ import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { APIError } from "better-auth/api";
 
 import {
+  AuthenticationRequiredError,
+  EmailVerificationRequiredError,
   getActiveSession,
   requireActiveVerifiedSession,
 } from "../../src/server/auth/policy";
+import {
+  completeOnboardingForSession,
+  getOnboardingStateForSession,
+  InvalidOnboardingInputError,
+} from "../../src/server/profiles/onboarding";
 import {
   CapturedAuthEmail,
   resetTestDatabase,
@@ -108,6 +115,25 @@ async function signIn(email: string, password = PASSWORD) {
   cookies.capture(result.headers);
 
   return { cookies, session: result.response };
+}
+
+async function sessionFor(email: string) {
+  const user = await testPrisma.user.findUniqueOrThrow({ where: { email } });
+  return { user };
+}
+
+async function authenticatedSessionFor(email: string, password: string) {
+  const { cookies } = await signIn(email, password);
+  const session = await testAuth.api.getSession({
+    headers: cookies.headers(),
+    query: { disableRefresh: true },
+  });
+
+  if (!session) {
+    throw new Error("Expected an authenticated test session");
+  }
+
+  return session;
 }
 
 beforeEach(async () => {
@@ -522,5 +548,269 @@ describe("database-backed rate limiting", () => {
       message: "Too many requests. Please try again later.",
     });
     expect(await testPrisma.rateLimit.count()).toBeGreaterThan(0);
+  });
+});
+
+describe("Phase 1 onboarding invariants", () => {
+  it("creates a profile from the authenticated identity and trims the display name", async () => {
+    const { email, password } = await registerVerified(
+      nextEmail("onboard-create"),
+    );
+    const session = await authenticatedSessionFor(email, password);
+    const initialState = await getOnboardingStateForSession(
+      session,
+      testPrisma,
+    );
+
+    expect(initialState).toEqual({
+      displayName: "Integration User",
+      onboardingComplete: false,
+      profileExists: false,
+    });
+
+    const result = await completeOnboardingForSession(
+      session,
+      { displayName: "  Ada Lovelace  " },
+      testPrisma,
+    );
+    const user = await testPrisma.user.findUniqueOrThrow({ where: { email } });
+    const profile = await testPrisma.profile.findUniqueOrThrow({
+      where: { userId: user.id },
+    });
+
+    expect(result).toMatchObject({
+      displayName: "Ada Lovelace",
+      onboardingComplete: true,
+      completedNow: true,
+    });
+    expect(profile.userId).toBe(user.id);
+    expect(profile.displayName).toBe("Ada Lovelace");
+    expect(profile.onboardingCompletedAt).toBeInstanceOf(Date);
+    await expect(
+      getOnboardingStateForSession(session, testPrisma),
+    ).resolves.toEqual({
+      displayName: "Ada Lovelace",
+      onboardingComplete: true,
+      profileExists: true,
+    });
+  });
+
+  it("updates an existing incomplete profile without changing its identity", async () => {
+    const { email, password } = await registerVerified(
+      nextEmail("onboard-existing"),
+    );
+    const session = await authenticatedSessionFor(email, password);
+    const user = await testPrisma.user.findUniqueOrThrow({ where: { email } });
+    await testPrisma.profile.create({
+      data: {
+        userId: user.id,
+        displayName: "Existing Name",
+        onboardingCompletedAt: null,
+      },
+    });
+    await expect(
+      getOnboardingStateForSession(session, testPrisma),
+    ).resolves.toMatchObject({
+      displayName: "Existing Name",
+      onboardingComplete: false,
+      profileExists: true,
+    });
+
+    const result = await completeOnboardingForSession(
+      session,
+      { displayName: "  Updated Name  " },
+      testPrisma,
+    );
+    const profile = await testPrisma.profile.findUniqueOrThrow({
+      where: { userId: user.id },
+    });
+
+    expect(result.completedNow).toBe(true);
+    expect(profile).toMatchObject({
+      userId: user.id,
+      displayName: "Updated Name",
+    });
+    expect(profile.onboardingCompletedAt).toBeInstanceOf(Date);
+  });
+
+  it("rejects unauthenticated, unverified, and suspended sessions without writes", async () => {
+    await expect(
+      completeOnboardingForSession(
+        null,
+        { displayName: "Should Not Exist" },
+        testPrisma,
+      ),
+    ).rejects.toBeInstanceOf(AuthenticationRequiredError);
+
+    const { email: unverifiedEmail } = await register(
+      nextEmail("onboard-unverified"),
+    );
+    const unverifiedSession = await sessionFor(unverifiedEmail);
+    await expect(
+      completeOnboardingForSession(
+        unverifiedSession,
+        { displayName: "Should Not Exist" },
+        testPrisma,
+      ),
+    ).rejects.toBeInstanceOf(EmailVerificationRequiredError);
+
+    const { email: suspendedEmail } = await registerVerified(
+      nextEmail("onboard-suspended"),
+    );
+    const suspendedUser = await testPrisma.user.findUniqueOrThrow({
+      where: { email: suspendedEmail },
+    });
+    await testPrisma.user.update({
+      where: { id: suspendedUser.id },
+      data: { accountStatus: "SUSPENDED" },
+    });
+    await expect(
+      completeOnboardingForSession(
+        { user: { ...suspendedUser, accountStatus: "SUSPENDED" } },
+        { displayName: "Should Not Exist" },
+        testPrisma,
+      ),
+    ).rejects.toBeInstanceOf(AuthenticationRequiredError);
+
+    expect(await testPrisma.profile.count()).toBe(0);
+  });
+
+  it("rejects malicious extra fields and never writes another user's profile", async () => {
+    const { email: ownerEmail, password: ownerPassword } =
+      await registerVerified(nextEmail("onboard-owner"));
+    const { email: otherEmail, password: otherPassword } =
+      await registerVerified(nextEmail("onboard-other"));
+    const ownerSession = await authenticatedSessionFor(
+      ownerEmail,
+      ownerPassword,
+    );
+    const otherSession = await authenticatedSessionFor(
+      otherEmail,
+      otherPassword,
+    );
+    const otherUser = await testPrisma.user.findUniqueOrThrow({
+      where: { email: otherEmail },
+    });
+    await testPrisma.profile.create({
+      data: {
+        userId: otherUser.id,
+        displayName: "Other User",
+        onboardingCompletedAt: null,
+      },
+    });
+
+    await expect(
+      completeOnboardingForSession(
+        ownerSession,
+        {
+          displayName: "Owner Name",
+          userId: otherUser.id,
+          onboardingCompletedAt: new Date("2000-01-01T00:00:00.000Z"),
+          globalRole: "ADMIN",
+          accountStatus: "SUSPENDED",
+        },
+        testPrisma,
+      ),
+    ).rejects.toBeInstanceOf(InvalidOnboardingInputError);
+
+    expect(
+      await testPrisma.profile.findUnique({ where: { userId: otherUser.id } }),
+    ).toMatchObject({
+      userId: otherUser.id,
+      displayName: "Other User",
+      onboardingCompletedAt: null,
+    });
+    expect(
+      await testPrisma.profile.findUnique({
+        where: { userId: ownerSession.user.id },
+      }),
+    ).toBeNull();
+
+    await completeOnboardingForSession(
+      ownerSession,
+      { displayName: "Owner Name" },
+      testPrisma,
+    );
+    expect(
+      await testPrisma.profile.findUnique({
+        where: { userId: otherUser.id },
+      }),
+    ).toMatchObject({
+      displayName: "Other User",
+      onboardingCompletedAt: null,
+    });
+    await expect(
+      getOnboardingStateForSession(otherSession, testPrisma),
+    ).resolves.toMatchObject({
+      displayName: "Other User",
+      onboardingComplete: false,
+    });
+  });
+
+  it("handles concurrent completion idempotently", async () => {
+    const { email, password } = await registerVerified(
+      nextEmail("onboard-concurrent"),
+    );
+    const session = await authenticatedSessionFor(email, password);
+    const results = await Promise.all([
+      completeOnboardingForSession(
+        session,
+        { displayName: "First Concurrent Name" },
+        testPrisma,
+      ),
+      completeOnboardingForSession(
+        session,
+        { displayName: "Second Concurrent Name" },
+        testPrisma,
+      ),
+    ]);
+    const user = await testPrisma.user.findUniqueOrThrow({ where: { email } });
+    const profiles = await testPrisma.profile.findMany({
+      where: { userId: user.id },
+    });
+
+    expect(results.filter((result) => result.completedNow)).toHaveLength(1);
+    expect(profiles).toHaveLength(1);
+    expect(profiles[0]?.userId).toBe(user.id);
+    expect(profiles[0]?.displayName).toBe(
+      results.find((result) => result.completedNow)?.displayName,
+    );
+    expect(
+      results.every(
+        (result) => result.displayName === profiles[0]?.displayName,
+      ),
+    ).toBe(true);
+    expect(profiles[0]?.onboardingCompletedAt).toBeInstanceOf(Date);
+  });
+
+  it("does not reset the completion timestamp or canonical name after completion", async () => {
+    const { email, password } = await registerVerified(
+      nextEmail("onboard-repeat"),
+    );
+    const session = await authenticatedSessionFor(email, password);
+    await completeOnboardingForSession(
+      session,
+      { displayName: "Canonical Name" },
+      testPrisma,
+    );
+    const user = await testPrisma.user.findUniqueOrThrow({ where: { email } });
+    const firstProfile = await testPrisma.profile.findUniqueOrThrow({
+      where: { userId: user.id },
+    });
+    const firstCompletion = firstProfile.onboardingCompletedAt;
+
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    const repeated = await completeOnboardingForSession(
+      session,
+      { displayName: "Should Not Replace" },
+      testPrisma,
+    );
+    const finalProfile = await testPrisma.profile.findUniqueOrThrow({
+      where: { userId: user.id },
+    });
+
+    expect(repeated.completedNow).toBe(false);
+    expect(finalProfile.displayName).toBe("Canonical Name");
+    expect(finalProfile.onboardingCompletedAt).toEqual(firstCompletion);
   });
 });
