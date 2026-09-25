@@ -54,4 +54,3 @@ jobs:
 
       - name: Dependency audit (blocking)
         run: npm audit --audit-level=high
-
