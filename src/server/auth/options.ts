@@ -1,7 +1,14 @@
 import { APIError } from "better-auth/api";
 import type { BetterAuthOptions } from "better-auth";
 
+import { AuthEmailDeliveryError } from "@/server/email/errors";
+import { reportVerificationDeliveryFailure } from "@/server/email/operational-log";
+
 import { safeAuthLogger } from "./logger";
+import {
+  AUTH_EMAIL_VERIFICATION_EXPIRES_IN_SECONDS,
+  AUTH_PASSWORD_RESET_EXPIRES_IN_SECONDS,
+} from "./token-expiry";
 
 /**
  * CLI-safe Better Auth options.
@@ -90,8 +97,13 @@ export function createAuthOptions({ baseURL, email }: AuthOptionsInput) {
       // Better Auth 1.7.5 does not guarantee one transaction spanning token
       // consumption, password update, and session revocation. Phase 1 accepts
       // this native-flow limitation as an upstream residual risk.
-      resetPasswordTokenExpiresIn: 3600,
+      resetPasswordTokenExpiresIn: AUTH_PASSWORD_RESET_EXPIRES_IN_SECONDS,
       revokeSessionsOnPasswordReset: true,
+      // Deliberately not normalized. Better Auth 1.7.5 already awaits this
+      // delivery through `runInBackgroundOrAwait`, which swallows a transport
+      // failure, so `request-password-reset` is already enumeration-safe. Adding
+      // a second swallow here would only duplicate that behavior and would
+      // diverge from the native flow.
       sendResetPassword: async ({ user, url }) => {
         await email.sendPasswordResetEmail({
           to: user.email,
@@ -101,13 +113,28 @@ export function createAuthOptions({ baseURL, email }: AuthOptionsInput) {
     },
     emailVerification: {
       sendOnSignUp: true,
-      expiresIn: 3600,
+      expiresIn: AUTH_EMAIL_VERIFICATION_EXPIRES_IN_SECONDS,
       autoSignInAfterVerification: false,
       sendVerificationEmail: async ({ user, url }) => {
-        await email.sendVerificationEmail({
-          to: user.email,
-          url,
-        });
+        try {
+          await email.sendVerificationEmail({
+            to: user.email,
+            url,
+          });
+        } catch (error) {
+          if (!(error instanceof AuthEmailDeliveryError)) {
+            throw error;
+          }
+
+          // Normalize a provider delivery failure. Better Auth 1.7.5 rethrows a
+          // failed verification send, which would let the native
+          // `send-verification-email` endpoint return a distinguishable failure
+          // for an existing unverified account while returning success for a
+          // missing or already verified one. Collapsing the sanitized error here
+          // keeps the endpoint enumeration-safe; the transport still fails
+          // closed, and only one fixed operational line is emitted.
+          reportVerificationDeliveryFailure();
+        }
       },
     },
     verification: {

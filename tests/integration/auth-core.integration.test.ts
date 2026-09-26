@@ -3,7 +3,13 @@ import { createHash } from "node:crypto";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { APIError } from "better-auth/api";
+import { toNextJsHandler } from "better-auth/next-js";
 
+import { createAuth } from "../../src/server/auth/factory";
+import { createGuardedAuthHandler } from "../../src/server/auth/http-handler";
+import { createProductionAuthEmailConfigSource } from "../../src/server/email/config";
+import { AUTH_EMAIL_VERIFICATION_DELIVERY_FAILED_MESSAGE } from "../../src/server/email/operational-log";
+import { ResendProductionEmailTransport } from "../../src/server/email/production";
 import {
   AuthenticationRequiredError,
   EmailVerificationRequiredError,
@@ -26,6 +32,9 @@ import {
 } from "./fixtures";
 
 const PASSWORD = "Correct-Horse-Battery-Staple-42";
+const PROVIDER_FAILURE_MARKER =
+  "Provider failure: postgresql://teammate:secret@localhost/db reset-token=secret";
+const PROVIDER_RESPONSE_BODY_MARKER = "PROVIDER_RESPONSE_BODY_do_not_leak";
 
 let emailSequence = 0;
 
@@ -104,6 +113,90 @@ async function registerVerified(email = nextEmail(), password = PASSWORD) {
   });
 
   return registered;
+}
+
+const PRODUCTION_BASE_URL = "https://app.teammate.example";
+const TEST_RESEND_API_KEY = "re_INTEGRATION_TESTSECRET_do_not_log";
+const TEST_FROM_ADDRESS = "no-reply@integration.example";
+
+type ProviderBehaviour = "throws" | "rejects";
+
+/**
+ * The real production Resend transport, wired to a fake provider that fails the
+ * way a genuine outage or a rejected send does. The fake deliberately carries
+ * provider detail and an API key so the test can prove neither ever escapes.
+ */
+function createProductionEmailAuth(
+  behaviour: ProviderBehaviour,
+  baseUrl = PRODUCTION_BASE_URL,
+) {
+  return createAuth({
+    baseURL: baseUrl,
+    database: testPrisma,
+    email: new ResendProductionEmailTransport({
+      loadConfig: createProductionAuthEmailConfigSource({
+        env: {
+          RESEND_API_KEY: TEST_RESEND_API_KEY,
+          AUTH_EMAIL_FROM_ADDRESS: TEST_FROM_ADDRESS,
+        },
+        baseUrl,
+      }),
+      createProvider: () => ({
+        async send() {
+          if (behaviour === "rejects") {
+            return { delivered: false };
+          }
+
+          throw Object.assign(new Error(PROVIDER_FAILURE_MARKER), {
+            responseBody: PROVIDER_RESPONSE_BODY_MARKER,
+            apiKey: TEST_RESEND_API_KEY,
+          });
+        },
+      }),
+    }),
+    secret: createHash("sha256")
+      .update("teammate-auth-core-integration-test")
+      .digest("hex"),
+  });
+}
+
+type PostCapableHandler = {
+  POST: (request: Request) => Promise<Response>;
+};
+
+/** Call the native Better Auth `send-verification-email` endpoint directly. */
+function resendVerificationEmail(handler: PostCapableHandler, email: string) {
+  return handler.POST(
+    new Request(`${TEST_AUTH_BASE_URL}/api/auth/send-verification-email`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ email }),
+    }),
+  );
+}
+
+/** Spy on every console sink so the emitted signal can be asserted exactly. */
+function captureConsole() {
+  const sinks = {
+    error: vi.spyOn(console, "error").mockImplementation(() => undefined),
+    warn: vi.spyOn(console, "warn").mockImplementation(() => undefined),
+    log: vi.spyOn(console, "log").mockImplementation(() => undefined),
+    info: vi.spyOn(console, "info").mockImplementation(() => undefined),
+    debug: vi.spyOn(console, "debug").mockImplementation(() => undefined),
+  };
+
+  return {
+    output: () =>
+      Object.values(sinks)
+        .flatMap((sink) => sink.mock.calls.flat())
+        .map(String)
+        .join("\n"),
+    reset: () => {
+      for (const sink of Object.values(sinks)) {
+        sink.mockClear();
+      }
+    },
+  };
 }
 
 async function signIn(email: string, password = PASSWORD) {
@@ -425,6 +518,122 @@ describe("auth core privacy and password reset", () => {
     });
     expect(existingResend).toEqual(missingResend);
     expect(testEmail.takeAll()).toHaveLength(1);
+  });
+
+  it("keeps the forgot-password response neutral when delivery fails", async () => {
+    const { email } = await register();
+    const failingAuth = createProductionEmailAuth("throws");
+
+    const existingReset = await failingAuth.api.requestPasswordReset({
+      body: { email },
+    });
+    const missingReset = await failingAuth.api.requestPasswordReset({
+      body: { email: "missing@example.com" },
+    });
+
+    // Better Auth 1.7.5 awaits reset delivery through `runInBackgroundOrAwait`,
+    // which swallows a transport failure, so a delivery failure is
+    // indistinguishable from account existence at the API boundary. The reset
+    // callback itself is deliberately left unnormalized.
+    expect(existingReset).toEqual(missingReset);
+    expect(existingReset).toEqual(
+      await testAuth.api.requestPasswordReset({
+        body: { email: "missing@example.com" },
+      }),
+    );
+  });
+
+  it("cannot distinguish a failed verification delivery from a missing account", async () => {
+    const { email } = await register();
+    const captured = captureConsole();
+    const handler = toNextJsHandler(
+      createGuardedAuthHandler(createProductionEmailAuth("throws").handler),
+    );
+
+    // A: existing + unverified + provider failure.
+    // B: nonexistent account, so no delivery is attempted at all.
+    const failed = await resendVerificationEmail(handler, email);
+    const missing = await resendVerificationEmail(
+      handler,
+      "missing@example.com",
+    );
+
+    expect(failed.status).toBe(200);
+    expect(missing.status).toBe(200);
+    const failedBody = await failed.text();
+    expect(failedBody).toBe(await missing.text());
+    expect(JSON.parse(failedBody)).toEqual({ status: true });
+
+    // Only the single approved fixed operational line may be emitted, with no
+    // provider detail, recipient, URL, token, or better-call raw sink.
+    const logged = captured.output();
+    expect(logged).toContain(AUTH_EMAIL_VERIFICATION_DELIVERY_FAILED_MESSAGE);
+    expect(logged).not.toContain(PROVIDER_FAILURE_MARKER);
+    expect(logged).not.toContain(PROVIDER_RESPONSE_BODY_MARKER);
+    expect(logged).not.toContain(TEST_RESEND_API_KEY);
+    expect(logged).not.toContain("postgresql://");
+    expect(logged).not.toContain("reset-token");
+    expect(logged).not.toContain(email);
+    expect(logged).not.toContain("missing@example.com");
+    expect(logged).not.toContain("verify-email?token=");
+    expect(logged).not.toContain("# SERVER_ERROR:");
+
+    // A successful delivery must still delegate and must not emit the line.
+    captured.reset();
+    const healthy = await resendVerificationEmail(
+      toNextJsHandler(createGuardedAuthHandler(testAuth.handler)),
+      email,
+    );
+    expect(healthy.status).toBe(200);
+    expect(captured.output()).not.toContain(
+      AUTH_EMAIL_VERIFICATION_DELIVERY_FAILED_MESSAGE,
+    );
+    expect(
+      testEmail.takeAll().filter((message) => message.kind === "verification"),
+    ).toHaveLength(1);
+  });
+
+  it("cannot distinguish a failed verification delivery from a verified account", async () => {
+    const { email: verifiedEmail } = await registerVerified();
+    captureConsole();
+    const handler = toNextJsHandler(
+      createGuardedAuthHandler(createProductionEmailAuth("rejects").handler),
+    );
+
+    // A: existing + unverified + provider rejecting the send.
+    // C: existing + already verified, so no delivery is attempted.
+    const unverified = await register();
+    const failed = await resendVerificationEmail(handler, unverified.email);
+    const verified = await resendVerificationEmail(handler, verifiedEmail);
+
+    expect(failed.status).toBe(200);
+    expect(verified.status).toBe(200);
+    expect(await failed.text()).toBe(await verified.text());
+  });
+
+  it("normalizes a rejected production action URL on the resend endpoint", async () => {
+    const { email } = await register();
+    const captured = captureConsole();
+    // The CI-shaped HTTP base URL cannot produce a valid production action link,
+    // so the transport fails closed with `invalid-url` before any send. That
+    // failure must be normalized exactly like a provider failure.
+    const handler = toNextJsHandler(
+      createGuardedAuthHandler(
+        createProductionEmailAuth("throws", TEST_AUTH_BASE_URL).handler,
+      ),
+    );
+
+    const failed = await resendVerificationEmail(handler, email);
+    const missing = await resendVerificationEmail(
+      handler,
+      "missing@example.com",
+    );
+
+    expect(failed.status).toBe(200);
+    expect(await failed.text()).toBe(await missing.text());
+    expect(captured.output()).toContain(
+      AUTH_EMAIL_VERIFICATION_DELIVERY_FAILED_MESSAGE,
+    );
   });
 
   it("stores password-reset identifiers using the approved hash", async () => {

@@ -1,29 +1,40 @@
 import "server-only";
 
+import { authEnv } from "@/server/auth/env";
 import type { AuthEmailOperations } from "@/server/auth/options";
 
+import { createProductionAuthEmailConfigSource } from "./config";
 import { InMemoryDevelopmentEmailTransport } from "./development";
+import { ResendProductionEmailTransport } from "./production";
+import { createResendAuthEmailProvider } from "./resend";
+
+/**
+ * Runtime auth email boundary.
+ *
+ * Development messages are retained only in bounded, short-lived process memory.
+ * Integration tests inject an isolated in-process capture. Neither path exposes a
+ * mailbox route, persists to disk, or logs URLs/tokens.
+ *
+ * Production delegates to the Resend-backed adapter. Nothing in this module
+ * requires a real credential at import time: the configuration is resolved and
+ * the provider client is constructed only when a send is actually attempted, so
+ * `npm ci`, `prisma generate`, local development, tests, and a CI `next build`
+ * never need `RESEND_API_KEY` or `AUTH_EMAIL_FROM_ADDRESS`. Production sending
+ * therefore fails closed, with a sanitized error and no partial delivery, until
+ * the deployment supplies them.
+ *
+ * The trusted origin comes from the already-validated auth environment so email
+ * link validation and Better Auth share one source of truth.
+ */
+const productionEmail = new ResendProductionEmailTransport({
+  loadConfig: createProductionAuthEmailConfigSource({
+    env: process.env,
+    baseUrl: authEnv.BETTER_AUTH_URL,
+  }),
+  createProvider: createResendAuthEmailProvider,
+});
 
 const developmentEmail = new InMemoryDevelopmentEmailTransport();
 
-const unavailableProductionEmail: AuthEmailOperations = {
-  sendVerificationEmail: async () => {
-    throw new Error("Auth email delivery is not configured");
-  },
-  sendPasswordResetEmail: async () => {
-    throw new Error("Auth email delivery is not configured");
-  },
-};
-
-/**
- * Development/test email boundary.
- *
- * Development messages are retained only in bounded, short-lived process
- * memory. Integration tests inject an isolated in-process capture; neither path
- * exposes a mailbox route, persists to disk, or logs URLs/tokens. Production
- * fails closed until a reviewed provider adapter is introduced.
- */
 export const authEmail: AuthEmailOperations =
-  process.env.NODE_ENV === "production"
-    ? unavailableProductionEmail
-    : developmentEmail;
+  process.env.NODE_ENV === "production" ? productionEmail : developmentEmail;

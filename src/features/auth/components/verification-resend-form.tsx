@@ -58,8 +58,10 @@ export function VerificationResendForm() {
           return;
         }
 
-        // A provider failure can be account-specific. Return neutral copy so
-        // verification resend cannot reveal whether an account exists.
+        // Defense in depth. The Better Auth verification callback already
+        // normalizes a delivery failure so this endpoint cannot reveal whether an
+        // account exists. Keep the same neutral copy for any other unexpected
+        // failure, so no error shape can distinguish account existence either.
         clearVerificationEmailPrefill();
         setSubmitted(true);
         return;
