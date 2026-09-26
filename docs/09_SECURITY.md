@@ -176,6 +176,45 @@ secret is a deterministic repository value and a network-reachable test server
 would let anyone on the network mint a valid session cookie for the test
 database.
 
+### Own profile writes
+
+The own-profile read and write boundary is session-scoped end to end. No
+function, page, or action accepts a user identifier, and the page component
+takes no props at all, so no route segment, query, or body key can influence
+which profile is read or written.
+
+Mass assignment is prevented by four independent layers rather than one check:
+
+- the input schema is `.strict()`, so an unknown key is rejected instead of
+  silently dropped;
+- the Prisma payload is an explicit object literal built from validated output,
+  and client input is never spread into it;
+- the server boundary narrows the database to `Pick<PrismaClient, "profile">`,
+  making the `user` delegate untypeable there, so auth-owned fields such as
+  `globalRole` and `accountStatus` are structurally out of reach;
+- the Better Auth identity fields remain declared `input: false` upstream.
+
+The "must be onboarded" precondition is expressed inside the write itself as a
+conditional update, so it cannot be raced by a prior read. `avatarUrl` is
+absent from both the editable projection and the write payload.
+
+Validation runs in the action and again inside the server boundary, and it is
+the boundary parse that feeds the write, so removing the action-level parse
+would not create a bypass. The schema accepts `null` for optional fields so that
+re-validating an already normalized payload is a no-op; `null` is a distinct
+value and cannot carry an over-length or control-character string past the
+length and character rules, which are applied to the trimmed value that is
+actually stored.
+
+Unexpected failures collapse into one fixed generic message. Prisma errors, SQL,
+connection strings, internal identifiers, auth internals, and stack traces are
+never stringified, logged, or returned, and the Zod issue `input` is never read.
+
+Rate limiting is not applied to this write. The action requires a valid active
+and verified session, writes only the caller's own row, and has no external
+provider cost, so this is accepted for now and recorded here rather than treated
+as a defect.
+
 ## Accepted findings and residual risk
 
 Recorded deliberately rather than changed mechanically:
@@ -194,6 +233,16 @@ Recorded deliberately rather than changed mechanically:
   fail-closed refusal, not a leak.
 - The leaf email modules are not individually marked `server-only`; the
   composition module is. This mirrors the existing development transport.
+- `Profile.displayName` is not unique and is not Unicode-normalized, so two
+  accounts can hold visually similar names. No authorization decision keys on the
+  display name today, so this has no current privilege consequence; it becomes
+  relevant when a public profile or search ordering exists.
+- `profileVisibility` is stored and editable but read by no projector yet, so it
+  currently exposes nothing. The public-profile reader must filter on this column
+  rather than assume the write path already protected it.
+- Profile text length caps exist only at the Zod boundary; the columns are
+  unbounded text with no database CHECK. This matches the documented project
+  posture of validating at the server boundary.
 - Production security headers are not configured yet (Phase 8 scope). Current
   practical exposure is low because the application self-hosts fonts at build
   time and loads no third-party resources on the token-bearing pages.

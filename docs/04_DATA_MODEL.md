@@ -48,6 +48,32 @@ guarded on `onboardingCompletedAt: null` inside a transaction, so a replayed or
 duplicated submission cannot rewrite a completed timestamp or replace the
 canonical display name.
 
+## Own profile
+
+`/app/profile` exposes a session-scoped read and write boundary. Neither
+function accepts a user identifier: the identity always comes from the
+authenticated session, which is what makes cross-user access structurally
+impossible rather than merely validated against.
+
+Editable fields are `displayName`, `headline`, `bio`,
+`availabilityHoursPerWeek`, `timezone`, and `profileVisibility`. Server-side
+validation is authoritative and the Prisma payload is an explicit object, so
+`avatarUrl`, `userId`, `onboardingCompletedAt`, and the auth-owned `User` fields
+cannot be written through this path. `avatarUrl` is server-owned and has no
+write path until a trusted upload/storage boundary exists.
+
+`availabilityHoursPerWeek` is validated to the inclusive range 0–168. The
+column is a plain integer with no database CHECK, so the server boundary is the
+only control.
+
+`profileVisibility` is stored and editable but is not yet read by any
+projector, because the public profile route is deferred. `timezone` is validated
+against the runtime's IANA time-zone database via `Intl.DateTimeFormat`.
+
+A missing `Profile` row means the account has not completed onboarding, since
+onboarding is the only path that creates one. Such a session is routed to
+`/onboarding` rather than being given a manufactured profile.
+
 ## Skills
 
 `Skill`

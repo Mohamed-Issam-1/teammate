@@ -96,10 +96,10 @@ unverified (see "External configuration still pending").
 
 **Testing**
 - 220 unit tests (Vitest) across 24 files.
-- 59 PostgreSQL integration tests against a real, separately guarded
-  `teammate_test` database (31 auth/onboarding plus 28 Phase 2 schema-constraint
-  tests).
-- 8 Playwright end-to-end tests in Chromium covering the real browser journeys.
+- 76 PostgreSQL integration tests against a real, separately guarded
+  `teammate_test` database (31 auth/onboarding, 28 Phase 2 schema-constraint, and
+  17 own-profile tests).
+- 15 Playwright end-to-end tests in Chromium covering the real browser journeys.
 - Fail-closed test database guards for both integration and end-to-end suites.
 - E2E email capture through a test-only filesystem transport that is unreachable
   from any production-mode process.
@@ -136,12 +136,17 @@ Reviewed and consciously accepted, with rationale recorded in
 
 ## In progress
 
-**Phase 2 — Profiles and taxonomy.** Schema and migration checkpoint is
-complete: the `Profile` extensions, `Skill`, `UserSkill`, `Interest`, and
-`UserInterest` models exist as migration
+**Phase 2 — Profiles and taxonomy.** Two checkpoints are complete.
+
+*Schema and migration.* The `Profile` extensions, `Skill`, `UserSkill`,
+`Interest`, and `UserInterest` models exist as migration
 `20260926090638_phase2_profiles_and_taxonomy`, enforced by database constraint
-tests against real PostgreSQL. No profile UI, server action, taxonomy service,
-normalization runtime, or seed data exists yet.
+tests against real PostgreSQL.
+
+*Own profile read and edit.* `/app/profile` lets an onboarded user read and edit
+`displayName`, `headline`, `bio`, `availabilityHoursPerWeek`, `timezone`, and
+`profileVisibility`. All validation is server-side and authoritative. No taxonomy
+service, normalization runtime, or seed data exists yet.
 
 Deferred and still open:
 
@@ -150,13 +155,18 @@ Deferred and still open:
   checkpoint. Taxonomy must not be opened to user creation to work around it.
 - `UserSkill.yearsExperience` has no server-side validation range yet. It must be
   resolved before any profile-skill write path is implemented.
-- The public profile route and its URL shape are deferred.
+- The public profile route and its URL shape are deferred. `profileVisibility`
+  is stored and editable but nothing reads it yet, so it currently exposes
+  nothing; the public-profile reader must filter on it rather than assume the
+  write path protected it.
+- `avatarUrl` is server-owned and has no write path until the trusted
+  upload/storage checkpoint.
 - The runtime `nameKey`/`slug` normalization contract is not implemented; the
   database stores whatever it is given.
 
 ## Next target
 
-Phase 2 profile and taxonomy implementation, after the taxonomy seed decision.
+Taxonomy assignment, after the taxonomy seed decision.
 
 ## Open decisions
 
