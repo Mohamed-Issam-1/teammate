@@ -66,8 +66,9 @@ write path until a trusted upload/storage boundary exists.
 column is a plain integer with no database CHECK, so the server boundary is the
 only control.
 
-`profileVisibility` is stored and editable but is not yet read by any
-projector, because the public profile route is deferred. `timezone` is validated
+`profileVisibility` is enforced at the reader, and only at the reader:
+`readVisibleProfile` filters on it in its authorization query and never returns it
+in the projection. `timezone` is validated
 against the runtime's IANA time-zone database via `Intl.DateTimeFormat`.
 
 A missing `Profile` row means the account has not completed onboarding, since
@@ -116,6 +117,96 @@ and are not part of the taxonomy design.
 - Taxonomy is system-managed. No application surface — server action, route, or
   API — lets an ordinary user create, rename, recategorize, or delete a `Skill`
   or `Interest`. Ordinary users may read the taxonomy and assign existing entries
+
+## Viewing another member's profile
+
+`/profiles/[userId]` renders another member's profile. The `userId` in the path is
+an **opaque locator, not authorization**: possessing or guessing one grants
+nothing, because every request is re-authorized server-side against the target's
+current account state and the viewer's own server-resolved context.
+
+`User.id` is declared as unbounded `text` with no database default and no format
+constraint, so there is no project-owned id grammar to validate. The route
+therefore applies a length bound and a control-character check only, and lets a
+lookup miss fall through to not-found. UUID validation would be wrong: the ids
+Better Auth generates are 32-character alphanumeric strings, so any stricter
+pattern would add no security while risking a false not-found for a real user.
+
+### Target eligibility
+
+A target is viewable only when the account behind it is `ACTIVE`, email-verified,
+and finished onboarding, and a `Profile` row exists. If any of those fail, the
+result is the same not-found response as for an id that does not exist, so a
+suspended, unverified, or half-set-up account is never exposed and its state is
+never revealed.
+
+### Visibility semantics
+
+| `profileVisibility` | Owner | Another ACTIVE + verified member | Anonymous |
+| --- | --- | --- | --- |
+| `PRIVATE` | allowed | not found | not found |
+| `MEMBERS_ONLY` | allowed | allowed | not found |
+| `PUBLIC` | allowed | allowed | allowed |
+
+Onboarding is not required of the *viewer*: the Source of Truth does not define
+"member" more narrowly than a signed-in TeamMate account. An authenticated but
+ineligible viewer (unverified or non-ACTIVE) is resolved to the anonymous tier, so
+it can never hold a privilege an anonymous visitor lacks. It can therefore still
+view a `PUBLIC` profile, exactly as an anonymous visitor can, and gains nothing
+further.
+
+The owner sees the same safe projection through this route as anyone else. Own
+management, including the private fields listed below, stays on `/app/profile`.
+
+### Indistinguishable not-found
+
+One response covers every unavailable case: unknown id, unknown `Profile`,
+malformed locator, `PRIVATE` seen by a non-owner, `MEMBERS_ONLY` seen anonymously
+or by an ineligible account, and a suspended, unverified, or incomplete target.
+The boundary returns `null` for all of them and the page calls `notFound()`,
+which renders the existing generic 404. There is no redirect to sign-in, because
+doing so would itself disclose that a profile exists.
+
+### Safe profile projection
+
+The view returns only what the page needs:
+
+- `displayName`, `headline`, `bio`, `avatarUrl`
+- skills: `slug`, `name`, `category`, `proficiencyLevel`
+- interests: `slug`, `name`
+
+Deliberately excluded: `User.id`, `Profile.userId`, `email`, `emailVerified`,
+`globalRole`, `accountStatus`, `createdAt`, `updatedAt`, `onboardingCompletedAt`,
+`timezone`, `availabilityHoursPerWeek`, `nameKey`, and `yearsExperience`. Skills
+are ordered by category (nulls last) then name, and interests by name, matching
+the ordering used for the owner's own assignments.
+
+`yearsExperience` is intentionally private in this projection. It exists on
+`UserSkill` and is fully readable on `/app/profile`, but it is self-reported
+working history rather than something a visitor is entitled to, so it is left out
+even though every other skill field is shown.
+
+`avatarUrl` is projected but not rendered. It has no write path until the trusted
+upload and storage checkpoint, and no image host is allowlisted, so the page shows
+an initials placeholder rather than broadening image configuration for a field
+that cannot yet be set.
+
+### Caching and metadata
+
+Authorization here is viewer-dependent, so the route must never be served from a
+shared cache. It reads request headers through the session boundary, which forces
+per-request rendering, and it uses no `unstable_cache`, `revalidateTag`, or
+`use cache`. The build reports `/profiles/[userId]` as dynamically rendered.
+
+Route metadata is static and contains no profile data. A dynamic title would need
+its own authorized lookup, and `generateMetadata` resolves independently of the
+page: a profile switched to `PRIVATE` in between could still leak its display
+name into the head of a 404 response. Discoverability belongs with the later
+search and indexing work.
+
+There is no public search, member directory, profile suggestion, or sitemap yet.
+The route is the only way to reach a profile, and the application never displays
+or links a user's id.
   to themselves. Admin management is a later phase.
 - `name` uniqueness is case-sensitive under the default PostgreSQL collation.
   The `nameKey` unique constraint is what prevents `React` and `react` from

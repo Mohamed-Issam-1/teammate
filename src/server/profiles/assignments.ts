@@ -12,6 +12,7 @@ import {
   type SaveSkillAssignmentInput,
 } from "@/features/profile/assignment-validation";
 import { requireActiveVerifiedSession } from "@/server/auth/policy";
+import { compareByCategoryThenName } from "@/server/taxonomy/ordering";
 
 /**
  * Own skill/interest assignment boundary.
@@ -91,29 +92,6 @@ function requireOwnedIdentity(session: OwnAssignmentSession | null): string {
   return requireActiveVerifiedSession(session).user.id;
 }
 
-/**
- * Compare two optional categories, sorting null last.
- *
- * PostgreSQL's `ASC` default places NULLs last, so an empty-string substitution
- * would be wrong: it would float uncategorized skills to the top instead of the
- * bottom of the list.
- */
-function compareNullableCategory(a: string | null, b: string | null): number {
-  if (a === b) {
-    return 0;
-  }
-
-  if (a === null) {
-    return 1;
-  }
-
-  if (b === null) {
-    return -1;
-  }
-
-  return a.localeCompare(b);
-}
-
 /** Confirm onboarding completed, since assignments are only meaningful then. */
 async function requireOnboarded(
   userId: string,
@@ -165,10 +143,7 @@ export async function listOwnSkillAssignments(
       proficiencyLevel: row.proficiencyLevel,
       yearsExperience: row.yearsExperience,
     }))
-    .sort((a, b) => {
-      const byCategory = compareNullableCategory(a.category, b.category);
-      return byCategory === 0 ? a.name.localeCompare(b.name) : byCategory;
-    });
+    .sort(compareByCategoryThenName);
 }
 
 /**

@@ -268,6 +268,83 @@ onboarding update only ever completes and nothing reverses it — so a
 read-then-write cannot produce an invalid state. If a future phase adds a way to
 revoke onboarding, this must be revisited.
 
+
+### Public profile viewing
+
+`/profiles/[userId]` is the only surface that renders another person's data, and
+it is read-only. The protections, and why each is here:
+
+- **The path id is a locator, not a credential.** Authorization is recomputed from
+  the server-resolved viewer and the target's current database state on every
+  request. There is no cached decision and no client-supplied owner flag,
+  visibility value, or hidden form field anywhere in the flow.
+- **One answer for every unavailable case.** The boundary returns `null` for an
+  unknown id, an unknown `Profile`, a malformed locator, an ineligible target, and
+  a visibility the viewer lacks, and the page maps all of them to a single
+  `notFound()`. Because the reasons are collapsed before they leave the boundary,
+  the response cannot be used to enumerate accounts or to learn that an account is
+  suspended, unverified, or half-onboarded. The route never redirects to sign-in,
+  which would itself confirm that something exists at that id.
+- **Target eligibility precedes visibility.** A suspended, unverified, or
+  incomplete account is refused even for `PUBLIC`, and even for its own owner. A
+  visibility setting cannot be used to keep an ineligible profile reachable.
+- **Ineligible viewers are collapsed to anonymous.** An unverified or non-ACTIVE
+  signed-in session resolves to the weakest viewer tier, so there is no code path
+  where "authenticated" alone is treated as sufficient. Such a viewer can still
+  read a `PUBLIC` profile, exactly as an anonymous visitor can, and gains nothing
+  beyond that.
+- **Two-phase read.** The first query fetches only what authorization needs. The
+  projection query runs only after access is granted, so an unauthorized request
+  never causes skill or interest rows to be loaded. A single combined query would
+  read `yearsExperience` and other private columns for accounts the viewer may not
+  see.
+- **Minimal database contract.** The boundary takes `Pick<PrismaClient, "user">`,
+  which has no write methods, so the module is structurally read-only. Every
+  `select` is explicit, and an architectural test fails the build if a column that
+  is not needed even for authorization (including `yearsExperience`, `timezone`,
+  `availabilityHoursPerWeek`, and `nameKey`) is ever selected.
+- **No locator validation theater.** The id is unbounded text with no schema
+  format, so the route bounds length and rejects control characters, and otherwise
+  lets a lookup miss become not-found. A stricter pattern would couple the route to
+  a third-party id generator and could deny a legitimate user without adding any
+  security, because the locator is not authorization.
+- **No shared caching.** The route is viewer-dependent, so it renders per request
+  via the header-reading session boundary and uses no `unstable_cache`,
+  `revalidateTag`, or `use cache`. The build confirms it is dynamic. An
+  architectural test asserts these stay absent so a later caching change cannot
+  reintroduce cross-user leakage silently.
+- **Static metadata.** Route metadata carries no profile data. `generateMetadata`
+  resolves independently of the page, so a profile switched to `PRIVATE` in
+  between could otherwise leak its display name into the head of a 404 response.
+- **The id is never rendered or linked.** No page displays or links a user id, and
+  the projection contains no identifier, so a rendered profile cannot be used to
+  harvest locators.
+
+Accepted and recorded rather than changed:
+
+- Target eligibility and visibility are both evaluated in the first query, so a
+  suspension landing between that query and the projection query lets one
+  in-flight request render. This is the same read-precondition trade-off already
+  accepted for onboarding and for the ACTIVE check on assignment writes, and it is
+  bounded to a single request.
+- `avatarUrl` is projected but never rendered. It has no write path, so it is
+  always null today, and rendering an arbitrary remote image would require
+  broadening the image allowlist for no current benefit. The page shows an
+  initials placeholder.
+- An unexpected failure while reading the session on the public route degrades to
+  the anonymous tier rather than rendering a server error. This is fail-closed in
+  the correct direction, because anonymous is the tier with the fewest rights, and
+  it matches the existing fail-closed pattern in the auth options. The cost is that
+  a database outage on this one route presents as a not-found page rather than a
+  500, which would otherwise be a useful signal.
+- `scripts/e2e-account-fixture.ts` inherits `E2E_TEST_CONTEXT` and `NODE_ENV`
+  from the runner rather than setting them itself, so the guard's context checks
+  are not vacuous for that entry point. The pre-existing
+  `scripts/reset-e2e-database.ts` still self-asserts both; that is unchanged here,
+  and the guard's load-bearing checks, which cannot be self-satisfied, still apply
+  to it.- Public profile pages are not rate limited. Each read is a cheap indexed lookup by
+  primary key, so the exposure is low, but it is a real gap that belongs with the
+  release checklist.
 ## Accepted findings and residual risk
 
 Recorded deliberately rather than changed mechanically:
@@ -290,9 +367,11 @@ Recorded deliberately rather than changed mechanically:
   accounts can hold visually similar names. No authorization decision keys on the
   display name today, so this has no current privilege consequence; it becomes
   relevant when a public profile or search ordering exists.
-- `profileVisibility` is stored and editable but read by no projector yet, so it
-  currently exposes nothing. The public-profile reader must filter on this column
-  rather than assume the write path already protected it.
+- `profileVisibility` is enforced in exactly one place, the reader.
+  `readVisibleProfile` filters on it in its authorization query and never returns
+  it in the projection, so a new writer cannot expose a profile by forgetting a
+  filter. The editable projection on `/app/profile` returns it to its owner, and
+  no other surface reads it.
 - Profile text length caps exist only at the Zod boundary; the columns are
   unbounded text with no database CHECK. This matches the documented project
   posture of validating at the server boundary.

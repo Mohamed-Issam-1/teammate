@@ -136,7 +136,7 @@ Reviewed and consciously accepted, with rationale recorded in
 
 ## In progress
 
-**Phase 2 — Profiles and taxonomy.** Three checkpoints are complete.
+**Phase 2 — Profiles and taxonomy.** Four checkpoints are complete.
 
 *Schema and migration.* The `Profile` extensions, `Skill`, `UserSkill`,
 `Interest`, and `UserInterest` models exist as migration
@@ -169,22 +169,36 @@ rely on `(userId, interestId)`, so repeated and concurrent submissions leave
 exactly one assignment row. Removal is a scoped `deleteMany` on both columns, so
 it can never delete a `Skill` or `Interest` row.
 
+*Public profile viewing.* `/profiles/[userId]` renders another member's profile
+using the existing opaque `User.id` as a route locator. The id is not
+authorization: every request is re-authorized server-side. `PRIVATE` is visible
+only to the owner, `MEMBERS_ONLY` to the owner and any ACTIVE + verified signed-in
+user, and `PUBLIC` to everyone including anonymous visitors; an ineligible viewer
+is resolved to the anonymous tier so it never gains a privilege an anonymous
+visitor lacks. A target must be ACTIVE, verified, onboarded, and have a `Profile`
+row, and every unavailable case resolves to one indistinguishable not-found, so a
+suspended or half-set-up account is never exposed and no redirect to sign-in can
+disclose that a profile exists. The projection carries `displayName`, `headline`,
+`bio`, `avatarUrl`, and skill/interests display fields only: no identifier, no
+email or auth field, no `timezone`, no `availabilityHoursPerWeek`, and
+deliberately no `yearsExperience`. The route is read-only, dynamically rendered,
+and carries static metadata. The owner sees the same safe projection there as
+anyone else; private data stays on `/app/profile`.
+
 Deferred and still open:
 
-- The public profile route and its URL shape are deferred. `profileVisibility`
-  is stored and editable but nothing reads it yet, so it currently exposes
-  nothing; the public-profile reader must filter on it rather than assume the
-  write path protected it.
-- `avatarUrl` is server-owned and has no write path until the trusted
-  upload/storage checkpoint.
+- `avatarUrl` is server-owned and still has no write path. The public route
+  projects it but renders an initials placeholder, since there is no allowlisted
+  image host yet.
+- Public search, a member directory, and any profile discovery or indexing are
+  not built. The route is currently the only way to reach a profile.
 - Taxonomy administration is a later phase.
 
 ## Next target
 
-The public profile reader: another user's profile route, the `PUBLIC` /
-`MEMBERS_ONLY` projection that actually honors `profileVisibility`, and its
-authorization and anonymity rules.
-
+The trusted avatar upload and storage boundary: a server-side upload path, an
+allowlisted object-storage host, and the `Profile.avatarUrl` write path that does
+not yet exist.
 ## Open decisions
 
 - Production managed PostgreSQL vendor.

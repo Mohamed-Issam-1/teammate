@@ -86,6 +86,47 @@ function resetDatabaseState(): void {
   }
 }
 
+/**
+ * Run a guarded, out-of-process fixture command against the test database.
+ *
+ * Used for the few things a browser test cannot legitimately learn through the
+ * UI, most importantly a user's opaque id, which the application deliberately
+ * never displays or links.
+ */
+function runAccountFixture(args: string[]): string {
+  const result = spawnSync(
+    process.platform === "win32" ? "npx.cmd" : "npx",
+    ["--no-install", "tsx", "scripts/e2e-account-fixture.ts", ...args],
+    {
+      env: { ...process.env },
+      encoding: "utf8",
+      shell: process.platform === "win32",
+    },
+  );
+
+  if (result.status !== 0) {
+    throw new Error("The end-to-end account fixture command failed.");
+  }
+
+  return (result.stdout ?? "").trim();
+}
+
+/** The opaque user id for an address, read from the guarded test database. */
+export function userIdForEmail(email: string): string {
+  const id = runAccountFixture(["find-id", email]);
+
+  if (id.length === 0) {
+    throw new Error("Expected a user id from the account fixture.");
+  }
+
+  return id;
+}
+
+/** Set an account status, to prove a suspended target is not publicly visible. */
+export function setAccountStatus(email: string, status: string): void {
+  runAccountFixture(["set-status", email, status]);
+}
+
 export type CapturedKind = "verification" | "password-reset";
 
 export type CapturedMessage = {
