@@ -67,3 +67,60 @@ export function ProfileField({
     </div>
   );
 }
+
+/**
+ * Shared styling for the native `<select>` controls on the profile page.
+ *
+ * The design system has no select primitive, so this matches the `Input`
+ * treatment rather than inventing a one-off look per form. It is declared once
+ * so the skill and interest selectors cannot drift apart.
+ */
+const selectClassName =
+  "border-input hover:border-foreground/35 focus-visible:border-ring focus-visible:ring-ring/40 aria-invalid:border-destructive aria-invalid:ring-destructive/20 h-9 w-full rounded-lg border bg-transparent px-3 text-sm shadow-xs transition-[color,box-shadow,border-color] outline-none focus-visible:ring-[3px]";
+
+/**
+ * A native `<select>` wired to {@link ProfileField}.
+ *
+ * Native semantics are kept deliberately: `<optgroup>` grouping, the platform
+ * picker on mobile, and no custom listbox keyboard model to get wrong.
+ */
+export function ProfileSelect({
+  id,
+  label,
+  error,
+  hint,
+  hintId,
+  registration,
+  children,
+}: {
+  id: string;
+  label: string;
+  error?: string;
+  hint?: string;
+  hintId?: string;
+  /** Spread from `react-hook-form`'s `register`, e.g. `register("skillId")`. */
+  registration: Record<string, unknown>;
+  children: ReactNode;
+}) {
+  return (
+    <ProfileField
+      id={id}
+      label={label}
+      error={error}
+      hint={hint}
+      hintId={hintId}
+    >
+      {({ id: controlId, describedBy, invalid }) => (
+        <select
+          id={controlId}
+          aria-invalid={invalid}
+          aria-describedby={describedBy}
+          className={selectClassName}
+          {...registration}
+        >
+          {children}
+        </select>
+      )}
+    </ProfileField>
+  );
+}

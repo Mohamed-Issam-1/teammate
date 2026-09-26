@@ -136,7 +136,7 @@ Reviewed and consciously accepted, with rationale recorded in
 
 ## In progress
 
-**Phase 2 — Profiles and taxonomy.** Two checkpoints are complete.
+**Phase 2 — Profiles and taxonomy.** Three checkpoints are complete.
 
 *Schema and migration.* The `Profile` extensions, `Skill`, `UserSkill`,
 `Interest`, and `UserInterest` models exist as migration
@@ -153,14 +153,24 @@ normalization module derives `nameKey` (NFC, trim, collapse whitespace,
 lowercase) and validates a curated slug grammar. `npm run seed:taxonomy` inserts
 the product-owned starter set — 32 skills and 15 interests — and is idempotent,
 non-destructive, and fail-closed on conflict. Read-only, session-scoped list
-boundaries exist for future selection UI, with no write path.
+boundaries back the selection UI, with no taxonomy write path.
+
+*Own skill and interest assignment.* `/app/profile` now carries Skills and
+Interests cards alongside the existing profile form, each with its own server
+actions and pending/error state. A user may add, update, and remove **their own**
+`UserSkill` and `UserInterest` rows and nothing else. The user identity comes only
+from the server session — no assignment action accepts a user identifier from
+client input — so cross-user assignment is structurally impossible. Taxonomy ids
+are validated as UUIDs and then verified against a real row. `proficiencyLevel` is
+`BEGINNER`, `INTERMEDIATE`, `ADVANCED`, or `EXPERT`. `yearsExperience` is optional
+and validated at **0..100 inclusive** by application rules only, with no database
+CHECK constraint. Skill writes upsert on `(userId, skillId)` and interest adds
+rely on `(userId, interestId)`, so repeated and concurrent submissions leave
+exactly one assignment row. Removal is a scoped `deleteMany` on both columns, so
+it can never delete a `Skill` or `Interest` row.
 
 Deferred and still open:
 
-- Skill and interest assignment to a user's own profile, including proficiency
-  and `yearsExperience`. `yearsExperience` is an optional integer validated at
-  **0..100 inclusive** as an application rule; that range is decided but not yet
-  implemented, and no database CHECK constraint is added.
 - The public profile route and its URL shape are deferred. `profileVisibility`
   is stored and editable but nothing reads it yet, so it currently exposes
   nothing; the public-profile reader must filter on it rather than assume the
@@ -171,7 +181,9 @@ Deferred and still open:
 
 ## Next target
 
-Skill and interest assignment for the authenticated user's own profile.
+The public profile reader: another user's profile route, the `PUBLIC` /
+`MEMBERS_ONLY` projection that actually honors `profileVisibility`, and its
+authorization and anonymity rules.
 
 ## Open decisions
 

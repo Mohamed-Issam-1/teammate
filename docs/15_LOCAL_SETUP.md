@@ -157,7 +157,11 @@ conflict rather than rewriting it. It prints the target database name so you can
 confirm where it ran; the connection string is never printed.
 
 Taxonomy is system-managed: there is no application screen or API for creating,
-renaming, or deleting a skill or interest.
+renaming, or deleting a skill or interest. Users can only select entries that
+already exist, on their own profile at `/app/profile`. **If the taxonomy is empty
+locally, the Skills and Interests cards on that page show an "unavailable" state
+rather than letting you invent entries** — run `npm run seed:taxonomy` to populate
+it.
 
 ## Playwright
 
@@ -169,6 +173,14 @@ email-capture directory when it finishes.
 npx playwright install chromium
 npm run test:e2e
 ```
+
+The runner seeds the curated starter taxonomy into `teammate_test` before the
+application starts, so the browser tests that assign skills and interests do not
+depend on whatever happens to be left in that database. That seed is the same
+approved, insert-if-missing boundary as `npm run seed:taxonomy`, and it runs only
+after the existing database guard has proved the target is the test database. No
+taxonomy write path is exposed to the application or to the Playwright workers,
+and the per-test reset deliberately never deletes global taxonomy.
 
 Do not run `npm run dev` at the same time: both servers write to the same
 `.next/` directory.

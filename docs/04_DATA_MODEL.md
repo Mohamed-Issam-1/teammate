@@ -115,8 +115,8 @@ and are not part of the taxonomy design.
 
 - Taxonomy is system-managed. No application surface — server action, route, or
   API — lets an ordinary user create, rename, recategorize, or delete a `Skill`
-  or `Interest`. Ordinary users may read the taxonomy and, in a later checkpoint,
-  assign existing entries to themselves. Admin management is a later phase.
+  or `Interest`. Ordinary users may read the taxonomy and assign existing entries
+  to themselves. Admin management is a later phase.
 - `name` uniqueness is case-sensitive under the default PostgreSQL collation.
   The `nameKey` unique constraint is what prevents `React` and `react` from
   coexisting, and only when both rows store the same normalized key.
@@ -176,6 +176,86 @@ and `id`, `slug`, and `name` for interests. `nameKey` is never exposed, and no
 Prisma row is passed to a client wholesale. Reads require an ACTIVE and verified
 session, because in Phase 2 they exist only to back authenticated profile
 editing.
+
+## Own skill and interest assignments
+
+A user selects skills and interests that already exist in the system-managed
+taxonomy. There is no application path that creates, renames, recategorizes, or
+deletes a `Skill` or `Interest`; the only taxonomy write path is the approved
+`seed:taxonomy` seed boundary. Users manage the **join rows** for themselves
+only.
+
+### Authorization
+
+Every assignment read and write requires an ACTIVE, email-verified session with
+completed onboarding. The user identity comes from the server session alone: no
+assignment action accepts `userId`, `profileId`, `targetUserId`, or `ownerId`
+from client input, so cross-user assignment is structurally impossible rather
+than merely unauthorized. A not-onboarded user is redirected to `/onboarding` for
+page access, and their mutations are rejected server-side.
+
+### Accepted input
+
+A skill assignment accepts exactly three fields — `skillId`, `proficiencyLevel`,
+`yearsExperience` — and an interest assignment exactly one, `interestId`. Both
+schemas are strict, so a payload carrying anything else (`userId`, `globalRole`,
+`accountStatus`, `onboardingCompletedAt`, or a taxonomy field such as `name`,
+`slug`, `nameKey`, `category`) is rejected outright rather than silently
+dropped. The Prisma write payload is also constructed explicitly, field by
+field.
+
+Taxonomy ids are Prisma-generated UUIDs, so both are validated as UUID strings
+and then verified to reference a real row. A well-formed but unknown id yields a
+generic "Selected skill/interest is unavailable" message; taxonomy is shared
+system data, so nothing is disclosed about whether any particular row exists.
+
+`proficiencyLevel` is one of `BEGINNER`, `INTERMEDIATE`, `ADVANCED`, `EXPERT`.
+
+`yearsExperience` is optional and must be a whole number from 0 to 100
+**inclusive**. Empty browser input normalizes to `null`. Negative values, values
+above 100, fractions, exponent notation, hex, and arbitrary strings are rejected
+rather than coerced. The bounds are enforced by application validation only; there
+is deliberately no database `CHECK` constraint on this column, and changing that
+would require a migration.
+
+A JSON number written in exponent notation (`1e2`) is the same IEEE-754 value as
+its plain form (`100`) once parsed, so the two are indistinguishable and `1e2` is
+accepted as `100`. That is not a bypass: the stored value is still an integer
+inside the approved range, and every representation of an out-of-range number is
+rejected by the same range check.
+
+### Write semantics
+
+- Adding or updating a skill uses the `(userId, skillId)` unique key as an
+  upsert target. Submitting the same skill again updates the caller's existing
+  assignment instead of creating a duplicate, and concurrent saves leave exactly
+  one row.
+- Adding an interest is idempotent and relies on the `(userId, interestId)`
+  unique constraint, so an already-assigned interest and a concurrent add both
+  leave exactly one row.
+- Removal is a scoped `deleteMany` on **both** `userId` and the selected id. It
+  therefore cannot delete a `Skill` or `Interest` row and cannot touch another
+  user's assignment. Removing an absent own assignment is an idempotent success.
+
+### Assignment read projection
+
+The own-assignment read boundary returns only the caller's rows. A skill
+assignment projects `skillId`, `slug`, `name`, `category`, `proficiencyLevel`,
+and `yearsExperience`; an interest assignment projects `interestId`, `slug`, and
+`name`. `nameKey` is never returned, no other user's rows are included, and no
+raw Prisma model escapes the boundary. Skill assignments are ordered by category
+then name and interests by name, matching the taxonomy read ordering.
+
+### User interface
+
+`/app/profile` hosts three independent cards: the existing own-profile form, a
+Skills card, and an Interests card. Each concern has its own pending and error
+state and its own server actions, so one failing mutation never disturbs another.
+The skill selector is an accessible native `<select>` with `<optgroup>` grouping
+by category and presents already-assigned skills so an existing assignment can be
+updated without a separate edit control. There is no "create your own skill" or
+"create your own interest" fallback; an empty taxonomy renders a safe
+unavailable state.
 
 ## Projects
 

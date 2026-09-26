@@ -215,6 +215,59 @@ and verified session, writes only the caller's own row, and has no external
 provider cost, so this is accepted for now and recorded here rather than treated
 as a defect.
 
+### Own skill and interest assignments
+
+The assignment boundary is session-scoped in the same way as the own-profile
+boundary, and the protections are layered the same way:
+
+- no assignment function, action, or component accepts `userId`, `profileId`,
+  `targetUserId`, or `ownerId` from a caller. The identity is read from the server
+  session, so a client cannot choose whose rows it writes. Cross-user assignment
+  is therefore structurally impossible rather than merely unauthorized;
+- the skill and interest schemas are `.strict()`, so a payload carrying
+  `userId`, `globalRole`, `accountStatus`, `onboardingCompletedAt`, or a taxonomy
+  field (`name`, `slug`, `nameKey`, `category`) is rejected outright;
+- the Prisma write payloads are explicit object literals built from validated
+  output, and client input is never spread into them;
+- the database contract narrows `skill` and `interest` to `findUnique` only. A
+  taxonomy create, update, or delete is not merely unused in this module — it is
+  untypeable, so taxonomy cannot be poisoned or renamed through an assignment
+  write even by mistake;
+- the database contract omits the `user` delegate entirely, so auth-owned fields
+  are out of reach.
+
+Removal is a `deleteMany` scoped to **both** `userId` and the selected id. That
+scoping is what guarantees a removal can neither delete a `Skill`/`Interest`
+taxonomy row nor touch another user's assignment; both properties are pinned by
+integration tests that assert taxonomy row counts are unchanged after removal.
+
+Taxonomy ids are validated as UUID strings and then verified against a real row,
+because a well-formed UUID proves nothing about existence. A well-formed but
+unknown id returns a generic "Selected skill is unavailable" message. Taxonomy is
+shared system data rather than user-owned data, so this discloses nothing about
+any particular row or user, and the generic message is deliberate.
+
+`yearsExperience` is validated as a whole number in the inclusive range 0..100 by
+application rules only. There is deliberately **no** database `CHECK` constraint
+on the column, so the bound is enforced solely by the schema. This is recorded as
+a known limitation: any future write path that bypasses the Zod schema — a
+migration, a script, or an admin tool — could store an out-of-range value. The
+alternative, a `CHECK` constraint, would require migration 3 and was explicitly
+deferred for this checkpoint.
+
+Duplicate and concurrent submissions are handled by the database, not by
+application logic: the skill write upserts on the `(userId, skillId)` unique key
+and the interest add relies on `(userId, interestId)`, so repeated or racing
+submissions leave exactly one row. There is no read-then-insert path that a race
+could duplicate.
+
+Onboarding completion is a precondition **read** rather than part of the write,
+because `UserSkill` and `UserInterest` carry no onboarding column. This is
+acceptable because onboarding completion is monotonic in Phase 1 — the guarded
+onboarding update only ever completes and nothing reverses it — so a
+read-then-write cannot produce an invalid state. If a future phase adds a way to
+revoke onboarding, this must be revisited.
+
 ## Accepted findings and residual risk
 
 Recorded deliberately rather than changed mechanically:
@@ -243,6 +296,24 @@ Recorded deliberately rather than changed mechanically:
 - Profile text length caps exist only at the Zod boundary; the columns are
   unbounded text with no database CHECK. This matches the documented project
   posture of validating at the server boundary.
+- `UserSkill.yearsExperience` is likewise bounded 0..100 by the Zod schema only,
+  with no database CHECK. Any future write path that does not go through the
+  schema could store an out-of-range value. Recorded in
+  `04_DATA_MODEL.md` as well; adding the constraint requires a migration.
+- Assignment mutations are not rate limited. Each requires an ACTIVE verified
+  session, writes only the caller's own join rows, and has no external provider
+  cost, so the exposure is low, but it is a real gap rather than a solved one.
+- The ACTIVE/verified precondition is a **read** on every assignment write, not a
+  conditional update, because `UserSkill` and `UserInterest` carry no column that
+  could fold the check into the write. A suspension landing between the session
+  lookup and the write therefore lets exactly one in-flight request through. This
+  is the same accepted trade-off as the onboarding precondition above, and it is
+  bounded to a single request.
+- The assignment list reads are unpaginated. This is safe by construction rather
+  than by luck: the `(userId, skillId)` and `(userId, interestId)` unique
+  constraints mean a user can hold at most one row per taxonomy entry, so a
+  hostile client looping these actions cannot grow either list beyond the curated
+  taxonomy size.
 - Production security headers are not configured yet (Phase 8 scope). Current
   practical exposure is low because the application self-hosts fonts at build
   time and loads no third-party resources on the token-bearing pages.
