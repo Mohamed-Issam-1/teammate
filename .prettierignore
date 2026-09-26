@@ -4,6 +4,10 @@ node_modules/
 coverage/
 *.tsbuildinfo
 
+# Playwright output
+test-results/
+playwright-report/
+
 # Generated Prisma client
 src/generated/
 

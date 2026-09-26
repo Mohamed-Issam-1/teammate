@@ -14,7 +14,7 @@
     "test": "vitest run",
     "test:integration": "tsx scripts/run-auth-integration-tests.ts",
     "test:watch": "vitest",
-    "test:e2e": "playwright test",
+    "test:e2e": "tsx scripts/run-e2e-tests.ts",
     "db:check": "tsx scripts/db-check.ts",
     "postinstall": "prisma generate",
     "format": "prettier --write .",

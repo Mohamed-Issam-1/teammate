@@ -19,6 +19,13 @@ import type {
  *
  * The client is constructed per send from an already-validated API key, so
  * importing this module never requires or captures a secret.
+ *
+ * Operational note: the SDK writes its own raw error body to the console
+ * whenever `NODE_ENV` is not `production`. That cannot happen through this
+ * codebase, because the transport selector in `index.ts` only chooses the
+ * Resend adapter when `NODE_ENV === "production"` — the exact condition the SDK
+ * requires in order to stay quiet. Any future change that activates this
+ * adapter outside production mode would also activate SDK-level raw logging.
  */
 export function createResendAuthEmailProvider(
   apiKey: string,

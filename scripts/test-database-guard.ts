@@ -1,6 +1,15 @@
 export const TEST_DATABASE_CONTEXT_ENV = "AUTH_INTEGRATION_TEST_CONTEXT";
 export const TEST_DATABASE_CONTEXT_VALUE = "auth-core-integration";
 
+/**
+ * End-to-end suites run the real application, so they need their own explicit
+ * context marker instead of the integration marker. The marker is a second,
+ * independent fail-closed switch: a stray E2E invocation cannot silently reuse
+ * the integration guard.
+ */
+export const E2E_DATABASE_CONTEXT_ENV = "E2E_TEST_CONTEXT";
+export const E2E_DATABASE_CONTEXT_VALUE = "teammate-e2e";
+
 export type TestDatabaseEnvironment = Record<string, string | undefined>;
 
 export type SafeTestDatabase = {
@@ -34,7 +43,8 @@ function fail(message: string): never {
 
 function requireExplicitEnvironmentValue(
   environment: TestDatabaseEnvironment,
-  variableName: "DATABASE_URL" | "TEST_DATABASE_URL",
+  variableName:
+    "DATABASE_URL" | "DEVELOPMENT_DATABASE_URL" | "TEST_DATABASE_URL",
 ): string {
   const isOwnProperty = Object.prototype.hasOwnProperty.call(
     environment,
@@ -125,7 +135,8 @@ function rawDatabasePath(
  * guessing which database a complex URL will ultimately address.
  */
 function parsePostgresUrl(
-  variableName: "DATABASE_URL" | "TEST_DATABASE_URL",
+  variableName:
+    "DATABASE_URL" | "DEVELOPMENT_DATABASE_URL" | "TEST_DATABASE_URL",
   value: string,
 ): ParsedPostgresTarget {
   if (WHITESPACE_OR_CONTROL_PATTERN.test(value)) {
@@ -244,6 +255,87 @@ export function assertSafeTestDatabaseEnvironment(
   if (developmentTarget.normalizedTarget === testTarget.normalizedTarget) {
     fail(
       "TEST_DATABASE_URL normalized effective target must differ from DATABASE_URL",
+    );
+  }
+
+  return { testDatabaseUrl: testUrl };
+}
+
+/**
+ * Fail-closed guard for end-to-end suites that boot the real application.
+ *
+ * This applies the same strict target comparison as the integration guard, so a
+ * test run can never be pointed at the development database. It additionally
+ * requires an explicit E2E context marker and refuses to run while
+ * `NODE_ENV` is `production`, because the E2E email capture boundary is
+ * deliberately unreachable from any production-mode process.
+ *
+ * The development reference is read from `DEVELOPMENT_DATABASE_URL` rather than
+ * `DATABASE_URL`. An end-to-end run repoints `DATABASE_URL` at the test database
+ * for the application process, so the two would otherwise be the same value and
+ * the comparison would be meaningless. Callers therefore capture the real
+ * development URL before repointing `DATABASE_URL`.
+ *
+ * Callers spawn the application with `DATABASE_URL` replaced by the returned
+ * test URL, so the application process cannot reach the development database
+ * even if this guard were bypassed.
+ */
+export function assertSafeE2EDatabaseEnvironment(
+  environment: TestDatabaseEnvironment,
+): SafeTestDatabase {
+  if (environment[TEST_DATABASE_CONTEXT_ENV] === TEST_DATABASE_CONTEXT_VALUE) {
+    fail(
+      `${TEST_DATABASE_CONTEXT_ENV} must not identify the auth integration suite`,
+    );
+  }
+
+  if (environment[E2E_DATABASE_CONTEXT_ENV] !== E2E_DATABASE_CONTEXT_VALUE) {
+    fail(`${E2E_DATABASE_CONTEXT_ENV} must identify the end-to-end suite`);
+  }
+
+  if (environment.NODE_ENV === "production") {
+    fail("NODE_ENV must not be production for an end-to-end run");
+  }
+
+  const developmentUrl = requireExplicitEnvironmentValue(
+    environment,
+    "DEVELOPMENT_DATABASE_URL",
+  );
+  const testUrl = requireExplicitEnvironmentValue(
+    environment,
+    "TEST_DATABASE_URL",
+  );
+  const developmentTarget = parsePostgresUrl(
+    "DEVELOPMENT_DATABASE_URL",
+    developmentUrl,
+  );
+  const testTarget = parsePostgresUrl("TEST_DATABASE_URL", testUrl);
+
+  if (developmentTarget.hostname !== testTarget.hostname) {
+    fail(
+      "DEVELOPMENT_DATABASE_URL and TEST_DATABASE_URL hostnames must match exactly after lowercase normalization",
+    );
+  }
+
+  if (developmentTarget.effectivePort !== testTarget.effectivePort) {
+    fail(
+      "DEVELOPMENT_DATABASE_URL and TEST_DATABASE_URL effective ports must match exactly",
+    );
+  }
+
+  if (!testTarget.databaseName.endsWith("_test")) {
+    fail("TEST_DATABASE_URL database name must end in _test");
+  }
+
+  if (developmentTarget.databaseName === testTarget.databaseName) {
+    fail(
+      "TEST_DATABASE_URL must use a database name different from DEVELOPMENT_DATABASE_URL",
+    );
+  }
+
+  if (developmentTarget.normalizedTarget === testTarget.normalizedTarget) {
+    fail(
+      "TEST_DATABASE_URL normalized effective target must differ from DEVELOPMENT_DATABASE_URL",
     );
   }
 

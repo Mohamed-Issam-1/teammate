@@ -57,6 +57,29 @@ function readApiKey(
 }
 
 /**
+ * Refuse a plaintext production origin.
+ *
+ * Production action links must be HTTPS, so an HTTP `BETTER_AUTH_URL` would make
+ * every verification and reset send fail closed with `invalid-url` and no
+ * actionable signal. This check is deliberately lazy: it runs only when a
+ * production send is attempted, so a CI build that supplies the build-only
+ * `http://localhost:3000` dummy still succeeds, and local development over
+ * plain HTTP is unaffected.
+ */
+function assertProductionHttpsBaseUrl(baseUrl: string): void {
+  let protocol: string;
+  try {
+    protocol = new URL(baseUrl).protocol;
+  } catch {
+    throw notConfigured();
+  }
+
+  if (protocol !== "https:") {
+    throw notConfigured();
+  }
+}
+
+/**
  * Build the lazy production configuration source.
  *
  * Empty strings are treated as unset, matching the rest of the environment
@@ -74,6 +97,10 @@ export function createProductionAuthEmailConfigSource({
 
     if (typeof env.AUTH_EMAIL_FROM_ADDRESS !== "string") {
       throw notConfigured();
+    }
+
+    if (env.NODE_ENV === "production") {
+      assertProductionHttpsBaseUrl(baseUrl);
     }
 
     return {

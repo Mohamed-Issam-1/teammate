@@ -118,8 +118,10 @@ describe("auth email composition", () => {
       AUTH_EMAIL_FROM_ADDRESS: FROM_ADDRESS,
     });
 
-    // The CI dummy value must never reach a provider, and the HTTP action URL
-    // must be refused before any send.
+    // The CI dummy value must never reach a provider. Production refuses a
+    // plaintext origin outright, so the send is refused as misconfiguration
+    // rather than as a URL problem. The build itself remains valid because this
+    // check only runs when a real production send is attempted.
     const error = await authEmail
       .sendVerificationEmail({
         to: RECIPIENT,
@@ -132,7 +134,7 @@ describe("auth email composition", () => {
 
     expect(error).toMatchObject({
       name: "AuthEmailDeliveryError",
-      reason: "invalid-url",
+      reason: "not-configured",
       message: "Auth email could not be delivered.",
     });
   });

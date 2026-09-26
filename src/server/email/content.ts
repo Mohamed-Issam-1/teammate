@@ -39,7 +39,8 @@ function formatExpiry(expiresInSeconds: number): string {
     return `${hours} ${hours === 1 ? "hour" : "hours"}`;
   }
 
-  const minutes = Math.max(1, Math.round(expiresInSeconds / 60));
+  // Round down so the copy never promises a longer validity than the token has.
+  const minutes = Math.max(1, Math.floor(expiresInSeconds / 60));
   return `${minutes} ${minutes === 1 ? "minute" : "minutes"}`;
 }
 

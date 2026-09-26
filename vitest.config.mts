@@ -8,7 +8,12 @@ export default defineConfig({
     environment: "jsdom",
     setupFiles: ["./tests/setup.ts"],
     globals: true,
-    exclude: [...configDefaults.exclude, "tests/integration/**"],
+    // Playwright specs run under their own runner and are not Vitest tests.
+    exclude: [
+      ...configDefaults.exclude,
+      "tests/integration/**",
+      "tests/e2e/**",
+    ],
   },
   resolve: {
     alias: {

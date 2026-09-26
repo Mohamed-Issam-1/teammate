@@ -27,6 +27,10 @@ Exit criteria:
 
 ## Phase 1 — Authentication and onboarding
 
+Status: **code complete**. Live production email delivery remains externally
+unverified pending deployment credentials, a verified sender domain, and an
+HTTPS `BETTER_AUTH_URL`. See `STATUS.md`.
+
 Deliver:
 - Better Auth integration;
 - registration;
@@ -38,6 +42,13 @@ Deliver:
 - suspended/verification policy foundations;
 - onboarding shell;
 - auth E2E/integration coverage.
+
+Exit criteria:
+- unit, PostgreSQL integration, and Playwright E2E suites pass;
+- no unresolved HIGH/CRITICAL security finding;
+- documentation synchronized with the implementation;
+- production email adapter implemented and fail-closed, with live provider
+  verification explicitly tracked as an external deployment task.
 
 ## Phase 2 — Profiles and taxonomy
 

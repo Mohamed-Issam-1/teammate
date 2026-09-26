@@ -22,6 +22,24 @@ TeamMate adds application-specific profile/domain tables keyed to the auth user 
 - onboardingCompletedAt
 - createdAt / updatedAt
 
+### Phase 1 implemented subset
+
+Phase 1 implements only `userId`, `displayName`, `onboardingCompletedAt`,
+`createdAt`, and `updatedAt`. Every remaining field above is Phase 2 scope and
+does not exist yet. The single migration is
+`20260924082555_auth_onboarding_foundation`.
+
+`Profile.displayName` is the canonical display name for the account. The signup
+name is only the starting value offered on `/onboarding`; it is not a separate
+field and does not survive a later display-name change.
+
+Onboarding derives the user identity from the session only. There is no
+user-ID parameter anywhere in the path, the input schema is `.strict()` so
+unknown fields are rejected rather than ignored, and the completion write is
+guarded on `onboardingCompletedAt: null` inside a transaction, so a replayed or
+duplicated submission cannot rewrite a completed timestamp or replace the
+canonical display name.
+
 ## Skills
 
 `Skill`

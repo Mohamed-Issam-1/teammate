@@ -588,6 +588,51 @@ describe("ResendProductionEmailTransport lazy configuration", () => {
     expect(() => loadConfig()).toThrowError(AUTH_EMAIL_DELIVERY_ERROR_MESSAGE);
   });
 
+  it("fails closed in production when BETTER_AUTH_URL is not HTTPS", async () => {
+    for (const baseUrl of [
+      "http://localhost:3000",
+      "http://app.teammate.example",
+      "not-a-url",
+    ]) {
+      const { transport, provider } = createTransport({
+        baseUrl,
+        env: {
+          NODE_ENV: "production",
+          RESEND_API_KEY: API_KEY,
+          AUTH_EMAIL_FROM_ADDRESS: FROM_ADDRESS,
+        },
+      });
+
+      await expect(
+        transport.sendVerificationEmail({
+          to: RECIPIENT,
+          url: VERIFICATION_URL,
+        }),
+      ).rejects.toMatchObject({ reason: "not-configured" });
+
+      expect(provider.createdWithApiKeys).toEqual([]);
+      expect(provider.sent).toEqual([]);
+    }
+  });
+
+  it("allows an HTTP base URL outside production", async () => {
+    const { transport, provider } = createTransport({
+      baseUrl: "http://localhost:3000",
+      env: {
+        NODE_ENV: "development",
+        RESEND_API_KEY: API_KEY,
+        AUTH_EMAIL_FROM_ADDRESS: FROM_ADDRESS,
+      },
+    });
+
+    // An HTTP origin can never produce a valid production action URL, so this
+    // still fails closed, but on the URL check rather than configuration.
+    await expect(
+      transport.sendVerificationEmail({ to: RECIPIENT, url: VERIFICATION_URL }),
+    ).rejects.toMatchObject({ reason: "invalid-url" });
+    expect(provider.sent).toEqual([]);
+  });
+
   it("never includes configuration values in a configuration failure", async () => {
     const { transport } = createTransport({
       env: {

@@ -5,6 +5,7 @@ import type { AuthEmailOperations } from "@/server/auth/options";
 
 import { createProductionAuthEmailConfigSource } from "./config";
 import { InMemoryDevelopmentEmailTransport } from "./development";
+import { createE2EAuthEmailTransport } from "./e2e";
 import { ResendProductionEmailTransport } from "./production";
 import { createResendAuthEmailProvider } from "./resend";
 
@@ -25,6 +26,15 @@ import { createResendAuthEmailProvider } from "./resend";
  *
  * The trusted origin comes from the already-validated auth environment so email
  * link validation and Better Auth share one source of truth.
+ *
+ * Selection order:
+ *
+ * 1. `NODE_ENV === "production"` always selects the Resend adapter. The E2E
+ *    capture transport is unreachable from any production-mode process, so the
+ *    test-only boundary can never be activated by a deployment.
+ * 2. An explicit E2E context marker selects the filesystem capture transport
+ *    used by Playwright, which is inert during ordinary local development.
+ * 3. Everything else keeps the bounded in-memory development mailbox.
  */
 const productionEmail = new ResendProductionEmailTransport({
   loadConfig: createProductionAuthEmailConfigSource({
@@ -36,5 +46,12 @@ const productionEmail = new ResendProductionEmailTransport({
 
 const developmentEmail = new InMemoryDevelopmentEmailTransport();
 
-export const authEmail: AuthEmailOperations =
-  process.env.NODE_ENV === "production" ? productionEmail : developmentEmail;
+function selectAuthEmailOperations(): AuthEmailOperations {
+  if (process.env.NODE_ENV === "production") {
+    return productionEmail;
+  }
+
+  return createE2EAuthEmailTransport(process.env) ?? developmentEmail;
+}
+
+export const authEmail: AuthEmailOperations = selectAuthEmailOperations();
