@@ -22,12 +22,20 @@ TeamMate adds application-specific profile/domain tables keyed to the auth user 
 - onboardingCompletedAt
 - createdAt / updatedAt
 
-### Phase 1 implemented subset
+### Current implemented columns
 
-Phase 1 implements only `userId`, `displayName`, `onboardingCompletedAt`,
-`createdAt`, and `updatedAt`. Every remaining field above is Phase 2 scope and
-does not exist yet. The single migration is
-`20260924082555_auth_onboarding_foundation`.
+`Profile` currently has: `userId` (primary key), `displayName`, `headline`,
+`bio`, `avatarUrl`, `availabilityHoursPerWeek`, `timezone`, `profileVisibility`,
+`onboardingCompletedAt`, `createdAt`, `updatedAt`.
+
+`headline`, `bio`, `avatarUrl`, `availabilityHoursPerWeek`, and `timezone` are
+nullable. `profileVisibility` is non-null and defaults to `PRIVATE`.
+`avatarUrl` is written by a trusted server-side upload boundary; it is not
+synchronized with the Better Auth `User.image` field.
+
+Migrations: `20260924082555_auth_onboarding_foundation` and
+`20260926090638_phase2_profiles_and_taxonomy`. The second migration is additive
+only.
 
 `Profile.displayName` is the canonical display name for the account. The signup
 name is only the starting value offered on `/onboarding`; it is not a separate
@@ -43,29 +51,52 @@ canonical display name.
 ## Skills
 
 `Skill`
-- id
+- id (`@default(uuid())`, Prisma-generated; the column has no database default)
 - slug (unique)
 - name (unique/canonical)
+- nameKey (unique; the case-insensitive normalized key)
 - category optional
 
 `UserSkill`
 - userId
 - skillId
-- proficiencyLevel (bounded)
+- proficiencyLevel (`ProficiencyLevel` enum)
 - yearsExperience optional
 - unique(userId, skillId)
+- index(skillId)
+- `userId` cascades on user deletion; `skillId` is restricted while referenced
+
+No `createdAt`/`updatedAt` on either model; timestamps are specified per entity
+and are not part of the taxonomy design.
 
 ## Interests
 
 `Interest`
-- id
-- slug
+- id (`@default(uuid())`, Prisma-generated)
+- slug (unique)
+- nameKey (unique)
 - name
+- index-free; `UserInterest` carries the reverse index
 
 `UserInterest`
 - userId
 - interestId
-- unique pair
+- unique(userId, interestId)
+- index(interestId)
+- `userId` cascades on user deletion; `interestId` is restricted while referenced
+
+## Taxonomy invariants
+
+- Taxonomy is system-managed. No application surface may create, rename, or
+  delete a `Skill` or `Interest` row.
+- `name` uniqueness is case-sensitive under the default PostgreSQL collation.
+  The `nameKey` unique constraint is what prevents `React` and `react` from
+  coexisting, and only when both rows store the same normalized key.
+- The database performs no normalization. Deriving `nameKey` and `slug` is a
+  server-side responsibility, and the normalization contract is not yet
+  implemented.
+- Deleting a user cascades to their join rows only. Shared taxonomy rows are
+  never deleted as a side effect.
 
 ## Projects
 

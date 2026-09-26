@@ -13,18 +13,20 @@ datasource db {
 }
 
 model User {
-  id            String    @id
+  id            String         @id
   name          String
   email         String
-  emailVerified Boolean   @default(false)
+  emailVerified Boolean        @default(false)
   image         String?
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
-  globalRole    String    @default("USER")
-  accountStatus String    @default("ACTIVE")
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  globalRole    String         @default("USER")
+  accountStatus String         @default("ACTIVE")
   sessions      Session[]
   accounts      Account[]
   profile       Profile?
+  userSkills    UserSkill[]
+  userInterests UserInterest[]
 
   @@unique([email])
   @@map("user")
@@ -88,11 +90,77 @@ model RateLimit {
   @@map("rateLimit")
 }
 
+enum ProfileVisibility {
+  PRIVATE
+  MEMBERS_ONLY
+  PUBLIC
+}
+
+enum ProficiencyLevel {
+  BEGINNER
+  INTERMEDIATE
+  ADVANCED
+  EXPERT
+}
+
 model Profile {
-  userId                String    @id
-  displayName           String
-  onboardingCompletedAt DateTime?
-  createdAt             DateTime  @default(now())
-  updatedAt             DateTime  @updatedAt
-  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId                   String            @id
+  displayName              String
+  headline                 String?
+  bio                      String?
+  avatarUrl                String?
+  availabilityHoursPerWeek Int?
+  timezone                 String?
+  profileVisibility        ProfileVisibility @default(PRIVATE)
+  onboardingCompletedAt    DateTime?
+  createdAt                DateTime          @default(now())
+  updatedAt                DateTime          @updatedAt
+  user                     User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("Profile")
+}
+
+model Skill {
+  id       String      @id @default(uuid())
+  slug     String      @unique
+  name     String      @unique
+  nameKey  String      @unique
+  category String?
+  users    UserSkill[]
+
+  @@map("Skill")
+}
+
+model UserSkill {
+  userId           String
+  skillId          String
+  proficiencyLevel ProficiencyLevel
+  yearsExperience  Int?
+  user             User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  skill            Skill            @relation(fields: [skillId], references: [id], onDelete: Restrict)
+
+  @@unique([userId, skillId])
+  @@index([skillId])
+  @@map("UserSkill")
+}
+
+model Interest {
+  id      String         @id @default(uuid())
+  slug    String         @unique
+  nameKey String         @unique
+  name    String
+  users   UserInterest[]
+
+  @@map("Interest")
+}
+
+model UserInterest {
+  userId     String
+  interestId String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  interest   Interest @relation(fields: [interestId], references: [id], onDelete: Restrict)
+
+  @@unique([userId, interestId])
+  @@index([interestId])
+  @@map("UserInterest")
 }

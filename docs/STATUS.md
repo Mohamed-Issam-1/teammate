@@ -91,13 +91,14 @@ unverified (see "External configuration still pending").
   valid.
 
 **Phase 1 database**
-- Exactly one migration: `20260924082555_auth_onboarding_foundation`.
-  `prisma/schema.prisma` and the migration SQL are unchanged since creation.
+- Migration `20260924082555_auth_onboarding_foundation` is unchanged since
+  creation.
 
 **Testing**
-- 214 unit tests (Vitest) across 24 files.
-- 31 PostgreSQL integration tests against a real, separately guarded
-  `teammate_test` database.
+- 220 unit tests (Vitest) across 24 files.
+- 59 PostgreSQL integration tests against a real, separately guarded
+  `teammate_test` database (31 auth/onboarding plus 28 Phase 2 schema-constraint
+  tests).
 - 8 Playwright end-to-end tests in Chromium covering the real browser journeys.
 - Fail-closed test database guards for both integration and end-to-end suites.
 - E2E email capture through a test-only filesystem transport that is unreachable
@@ -135,11 +136,27 @@ Reviewed and consciously accepted, with rationale recorded in
 
 ## In progress
 
-None.
+**Phase 2 — Profiles and taxonomy.** Schema and migration checkpoint is
+complete: the `Profile` extensions, `Skill`, `UserSkill`, `Interest`, and
+`UserInterest` models exist as migration
+`20260926090638_phase2_profiles_and_taxonomy`, enforced by database constraint
+tests against real PostgreSQL. No profile UI, server action, taxonomy service,
+normalization runtime, or seed data exists yet.
+
+Deferred and still open:
+
+- A curated Skill/Interest taxonomy list and its source must be approved before
+  any taxonomy-selection UI is built. This is tracked as its own approval
+  checkpoint. Taxonomy must not be opened to user creation to work around it.
+- `UserSkill.yearsExperience` has no server-side validation range yet. It must be
+  resolved before any profile-skill write path is implemented.
+- The public profile route and its URL shape are deferred.
+- The runtime `nameKey`/`slug` normalization contract is not implemented; the
+  database stores whatever it is given.
 
 ## Next target
 
-Phase 1 review, then Phase 2 (profiles and taxonomy).
+Phase 2 profile and taxonomy implementation, after the taxonomy seed decision.
 
 ## Open decisions
 

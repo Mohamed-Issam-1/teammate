@@ -32,6 +32,11 @@ async function main(): Promise<void> {
       prisma.account.deleteMany(),
       prisma.verification.deleteMany(),
       prisma.profile.deleteMany(),
+      // `UserSkill` and `UserInterest` are intentionally absent: deleting a user
+      // cascades to them. Shared `Skill` and `Interest` rows must never be
+      // deleted here — they are global and reference-restricted. If a future
+      // end-to-end flow ever creates taxonomy rows, it must clean them up
+      // explicitly rather than relying on this cascade.
       prisma.user.deleteMany(),
     ]);
   } finally {

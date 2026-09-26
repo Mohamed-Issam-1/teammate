@@ -92,12 +92,19 @@ export const testAuth = createAuth({
 export async function resetTestDatabase(): Promise<void> {
   testEmail.clear();
 
+  // Join rows and shared taxonomy are removed explicitly. Deleting a user would
+  // cascade the join rows anyway, but taxonomy rows are global and reference-
+  // restricted, so they must be cleared deliberately and in dependency order.
   await testPrisma.$transaction([
     testPrisma.rateLimit.deleteMany(),
     testPrisma.session.deleteMany(),
     testPrisma.account.deleteMany(),
     testPrisma.verification.deleteMany(),
+    testPrisma.userSkill.deleteMany(),
+    testPrisma.userInterest.deleteMany(),
     testPrisma.profile.deleteMany(),
     testPrisma.user.deleteMany(),
+    testPrisma.skill.deleteMany(),
+    testPrisma.interest.deleteMany(),
   ]);
 }

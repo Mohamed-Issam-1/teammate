@@ -98,7 +98,7 @@ Check the live database connection (services must be running):
 npm run db:check
 ```
 
-Exactly one migration exists (`20260924082555_auth_onboarding_foundation`) and it is already applied to the development database. Use the migration workflow appropriate to pinned Prisma 7 for any reviewed change. Never use `prisma migrate reset` as a normal fix.
+Two migrations exist (`20260924082555_auth_onboarding_foundation` and `20260926090638_phase2_profiles_and_taxonomy`) and both are applied to the development database. Use the migration workflow appropriate to pinned Prisma 7 for any reviewed change. Never use `prisma migrate reset` as a normal fix.
 
 ## Test databases
 
