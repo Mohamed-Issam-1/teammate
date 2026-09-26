@@ -108,7 +108,7 @@ model Profile {
   displayName              String
   headline                 String?
   bio                      String?
-  avatarUrl                String?
+  avatarUrl                String?           @unique
   availabilityHoursPerWeek Int?
   timezone                 String?
   profileVisibility        ProfileVisibility @default(PRIVATE)

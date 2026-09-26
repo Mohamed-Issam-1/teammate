@@ -131,21 +131,40 @@ test("rejects an invalid time zone without saving", async ({ page }) => {
   await expect(page.getByText("Your profile has been saved.")).toHaveCount(0);
 });
 
-test("never offers an avatar or protected field control", async ({ page }) => {
+test("never offers an avatar URL field or a protected field control", async ({
+  page,
+}) => {
   await prepareOnboardedUser(page, "profile-noavatar");
 
   await gotoApp(page, "/app/profile");
 
-  await expect(page.getByLabel(/avatar/i)).toHaveCount(0);
-  for (const name of [
-    "avatarUrl",
-    "userId",
-    "onboardingCompletedAt",
-    "globalRole",
-    "accountStatus",
+  // Avatar upload exists, but only as a file input. There is no URL textbox and
+  // no way to type a storage key, a bucket, or an object key.
+  const fileInput = page.locator('input[type="file"][name="avatar"]');
+  await expect(fileInput).toHaveCount(1);
+  await expect(fileInput).toHaveAttribute(
+    "accept",
+    "image/jpeg,image/png,image/webp",
+  );
+
+  for (const selector of [
+    'input[name="avatarUrl"]',
+    'input[name="objectKey"]',
+    'input[name="bucket"]',
+    'input[name="userId"]',
+    'input[name="profileId"]',
+    'input[name="avatarToken"]',
+    'input[name="onboardingCompletedAt"]',
+    'input[name="globalRole"]',
+    'input[name="accountStatus"]',
   ]) {
-    await expect(page.locator(`[name="${name}"]`)).toHaveCount(0);
+    await expect(page.locator(selector), selector).toHaveCount(0);
   }
+
+  await expect(page.getByLabel(/avatar url/i)).toHaveCount(0);
+  await expect(page.getByLabel(/storage key|object key|bucket/i)).toHaveCount(
+    0,
+  );
 });
 
 test("redirects an unauthenticated visitor from /app/profile to /sign-in", async ({

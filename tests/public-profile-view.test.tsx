@@ -188,12 +188,26 @@ describe("public profile view", () => {
     }
   });
 
-  it("does not render an image element, because no avatar host is allowlisted", () => {
-    const { container } = renderView({
-      avatarUrl: "https://cdn.example/a.png",
-    });
+  it("shows an initials placeholder when the profile has no avatar", () => {
+    const { container } = renderView({ avatarUrl: null });
 
+    const placeholder = container.querySelector('[aria-hidden="true"]');
+    expect(placeholder).not.toBeNull();
+    expect(placeholder).toHaveTextContent("AL");
     expect(container.querySelector("img")).toBeNull();
+  });
+
+  it("renders the authorized same-origin avatar route when one is set", () => {
+    const token = "3f2504e0-4f89-41d3-9a0c-0305e82c3301";
+    const { container } = renderView({ avatarUrl: `/avatars/${token}` });
+
+    const image = container.querySelector("img");
+    expect(image).not.toBeNull();
+    // A same-origin path only. The browser request carries the viewer's session,
+    // so a server-side optimizer is deliberately not involved.
+    expect(image).toHaveAttribute("src", `/avatars/${token}`);
+    expect(image).toHaveAttribute("alt", "Ada Lovelace's avatar");
+    expect(image).toHaveAttribute("referrerpolicy", "no-referrer");
   });
 
   it("offers no editing or sign-in controls", () => {

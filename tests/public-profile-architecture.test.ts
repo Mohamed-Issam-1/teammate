@@ -158,14 +158,24 @@ describe("public profile projection posture", () => {
       path.join(repoRoot, "src/server/profiles/visible-profile.ts"),
       "utf8",
     );
+    const policy = readFileSync(
+      path.join(repoRoot, "src/server/profiles/visibility.ts"),
+      "utf8",
+    );
 
     // The authorization query is *supposed* to read these: a suspended or
-    // unverified target must be detected in order to be denied. The requirement
-    // is that they stay inside the boundary, so the exported projection type
-    // must not mention them.
-    expect(source).toContain("accountStatus: true");
-    expect(source).toContain("emailVerified: true");
-    expect(source).toContain("onboardingCompletedAt: true");
+    // unverified target must be detected in order to be denied. They live in the
+    // shared visibility policy so the profile page and the avatar route cannot
+    // drift into checking different columns, and the boundary consumes that
+    // single select rather than declaring its own.
+    expect(policy).toContain("accountStatus: true");
+    expect(policy).toContain("emailVerified: true");
+    expect(policy).toContain("onboardingCompletedAt: true");
+    expect(policy).toContain("profileVisibility: true");
+
+    expect(source).toContain("select: visibilityTargetSelect");
+    expect(source).not.toContain("accountStatus: true");
+    expect(source).not.toContain("emailVerified: true");
 
     const projectionType = source.slice(
       source.indexOf("export type VisibleProfile = {"),

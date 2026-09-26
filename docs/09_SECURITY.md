@@ -327,10 +327,6 @@ Accepted and recorded rather than changed:
   in-flight request render. This is the same read-precondition trade-off already
   accepted for onboarding and for the ACTIVE check on assignment writes, and it is
   bounded to a single request.
-- `avatarUrl` is projected but never rendered. It has no write path, so it is
-  always null today, and rendering an arbitrary remote image would require
-  broadening the image allowlist for no current benefit. The page shows an
-  initials placeholder.
 - An unexpected failure while reading the session on the public route degrades to
   the anonymous tier rather than rendering a server error. This is fail-closed in
   the correct direction, because anonymous is the tier with the fewest rights, and
@@ -342,9 +338,193 @@ Accepted and recorded rather than changed:
   are not vacuous for that entry point. The pre-existing
   `scripts/reset-e2e-database.ts` still self-asserts both; that is unchanged here,
   and the guard's load-bearing checks, which cannot be self-satisfied, still apply
-  to it.- Public profile pages are not rate limited. Each read is a cheap indexed lookup by
+  to it.
+
+- Public profile pages are not rate limited. Each read is a cheap indexed lookup by
   primary key, so the exposure is low, but it is a real gap that belongs with the
   release checklist.
+
+### Avatar upload, storage, and delivery
+
+Avatars are the first place a user-supplied binary reaches the server, so the
+controls are layered:
+
+- **The stored file is always server-produced.** The client sends bytes; the
+  server decodes them with libvips, validates the *decoded* format, normalizes,
+  and re-encodes WebP. The stored object is that WebP, never the upload. Nothing a
+  client sends is ever served back.
+- **Filename and `Content-Type` are treated as untrusted.** `processAvatarUpload`
+  receives only a `Buffer`, which is the structural reason a mislabelled upload
+  cannot change the outcome. Acceptance is the format the decoder reports, from an
+  allowlist of `jpeg`, `png`, and `webp`.
+- **SVG is refused explicitly.** libvips will rasterize SVG, and an SVG can carry
+  script, so the allowlist is what rejects it rather than decoder tolerance. GIF,
+  AVIF, PDF, HTML, and arbitrary binary are refused the same way.
+- **Animation and multi-page sources are refused**, so a stored avatar is a single
+  static frame and decode cost is bounded.
+- **Metadata is dropped, not copied.** EXIF orientation is applied and the image is
+  re-encoded into a fresh container, so EXIF, GPS, and any other source field do
+  not survive. A unit test asserts the output carries no EXIF or ICC profile.
+- **Authorization precedes body and image work.** The upload route verifies
+  same-origin, then requires the avatar capability, and only then reads a body,
+  parses the form, or decodes an image. A signed-out visitor issuing a same-origin
+  request therefore cannot make the server run libvips, which is what keeps the
+  endpoint from being an unauthenticated CPU and memory exhaustion primitive. The
+  write boundary authorizes again immediately before it writes, so the early check
+  is a fast rejection and never the only one. A regression test makes each stage
+  observable and proves the earlier ones are unreachable for a refused caller.
+- **The body read is bounded by a stream, not by a header.** `Content-Length` is
+  treated as an optional fast-path hint only: it can be missing under chunked or
+  HTTP/2 transfer, malformed, or simply wrong, and App Router route handlers apply
+  no default body cap. The body is read with a byte counter that abandons the stream
+  the moment the cap is passed, so an oversized or endless body never accumulates.
+  A non-numeric length is deliberately not trusted as small. The request cap is the
+  4 MiB file cap plus a 64 KiB multipart framing allowance; the 4 MiB file cap is
+  then enforced independently on the parsed part.
+- **`avatarUrl` is re-validated at the read boundary.** The public projection
+  re-parses the stored value with the strict parser instead of trusting the column,
+  exactly as the own-avatar read does. The write path only ever stores a canonical
+  path, so this is defence in depth: a legacy value, a data fix, or any future
+  writer cannot turn another member's profile into an arbitrary `src`.
+- **`avatarUrl` is unique in the database.** Migration `avatar_url_unique` adds a
+  unique index, so one non-null value maps to at most one profile and token
+  resolution is a `findUnique` rather than a non-unique search. That makes "a token
+  resolves to exactly one profile" structural instead of probabilistic, and it
+  indexes a public, unauthenticated route. PostgreSQL excludes NULLs, so profiles
+  without an avatar are unaffected. A token collision fails safely: the token is
+  confirmed unreferenced *before* anything is stored, so a collision can never
+  overwrite and then remove another profile's live object. After a bounded number
+  of attempts the write fails with one generic error, and no unique-constraint
+  violation can reach the client.
+- **A plaintext endpoint is denied by default.** `S3_ENDPOINT` must be HTTPS unless
+  the environment is *known* to be local, and the check is an allow-list on
+  `NODE_ENV` rather than a production match. This matters because the project
+  environment contract declares `NODE_ENV` optional, so a missing, empty, or
+  misspelled value is a reachable state; a production-only check would have
+  permitted plaintext in exactly that case. Only an exact `development` or `test`
+  value may use `http://`, for local MinIO-style development, where a signed
+  request carrying bucket credentials has nothing to expose. The check happens
+  lazily at configuration read, so a build or typecheck with no configuration
+  still succeeds.
+- **The body reader bounds bytes, chunks, and time.** A byte cap alone would not
+  stop a caller from sending a very large number of minimal chunks whose summed
+  length never approaches it, and no byte cap would stop a stream that simply never
+  ends. Empty chunks are never retained, the retained chunk count is separately
+  bounded, and each read races a wall-clock deadline, so a source that stalls
+  mid-stream is abandoned rather than merely one that produces too much. The chunk
+  ceiling is set high enough that a legitimate 4 MiB upload survives transport
+  segmentation, because refusing a valid maximum-size file would be its own bug.
+- **A failed read is not reported as a size problem.** A disconnect, a proxy reset,
+  a truncated body, and a stalled stream each produce an interrupted-read response
+  rather than a 413. Collapsing them into "too large" would tell a legitimate user
+  the wrong thing and would make a genuine size rejection indistinguishable in
+  telemetry, which is the signal that a real over-limit body depends on.
+- **The test filesystem adapter refuses production itself.** It carries its own
+  marker and `NODE_ENV` check in addition to the selector's, mirroring the guarded
+  development email transport, so a stray environment variable in a deployment
+  cannot silently persist avatars to a local directory instead of the configured
+  bucket.
+- **Cleanup failures are visible.** Best-effort deletion stays best-effort, so a
+  failed cleanup never fails the user's request, reverts a replacement, or restores
+  a removed reference. Each of the three paths emits one fixed operational line with
+  no arguments, so a persistently failing delete is no longer invisible. No provider
+  error, endpoint, bucket, key, or token can reach the log.
+- **Resource limits are enforced before expensive work.** The 4 MiB cap and the
+  empty check run on the raw buffer, ahead of any decode; the endpoint also
+  refuses an oversized declared `Content-Length` before buffering. A decoded-pixel
+  ceiling stops a small file that declares enormous dimensions, and output is
+  bounded to 512x512 with no upscaling.
+- **Metadata stripping also removes a privacy leak.** A photo's EXIF commonly
+  carries GPS coordinates, so stripping it is a disclosure control, not only
+  hygiene.
+- **The endpoint accepts one file and nothing else.** The form must contain exactly
+  one entry named `file`. Extra fields are refused rather than ignored, so a client
+  cannot smuggle a `userId`, `avatarUrl`, `bucket`, or `objectKey` alongside the
+  image. There is no field for a user identifier at all: identity comes only from
+  the session.
+- **Storage keys are server-owned.** The key is `avatars/<token>.webp`, built from
+  a CSPRNG UUID. No request value reaches a key, and the strict parser in front of
+  every deletion accepts only the exact `/avatars/<token>` shape, so a traversal
+  sequence, an absolute URL, a query string, or a legacy value never becomes an
+  object key. The end-to-end filesystem adapter additionally verifies the resolved
+  path stays inside its base directory and refuses any key outside the pattern.
+- **Cross-user writes are structurally impossible.** The write boundary is
+  session-scoped and takes no user identifier; the database contract is a
+  method-level `Pick`, so `avatarUrl` is the only writable column and the `user`
+  delegate is limited to reads. `User.image` is never written, which an
+  integration test pins by seeding a legacy value and asserting it survives.
+- **Delivery reuses the one visibility policy.** `/avatars/[token]` calls the same
+  `isProfileVisibleTo` the public profile page calls, with the same shared
+  authorization select, so an avatar can never be more permissive than the profile
+  it belongs to. Possessing a token grants nothing: it resolves the owning profile
+  and re-evaluates eligibility and visibility on every request.
+- **Eligibility precedes visibility.** A suspended, unverified, or incomplete
+  target is refused even for `PUBLIC`, and even for its own owner.
+- **Every unavailable case is one 404.** Unknown token, malformed token, unknown
+  profile, ineligible target, and a profile the viewer may not see are
+  indistinguishable, so the route cannot enumerate tokens or disclose why access
+  was refused. There is no listing, no search, and no prefix match on the stored
+  URL.
+- **Responses are `private, no-store` with `Vary: Cookie`.** Authorization is
+  viewer-dependent and a profile's visibility can change at any moment, so a shared
+  cache must never be able to hand a previously visible avatar to a viewer who is no
+  longer entitled to it. The route is `force-dynamic` and no `unstable_cache` or
+  `revalidateTag` is involved.
+- **Avatars bypass the image optimizer on purpose.** A same-origin `<img>` is
+  requested by the browser with its own session, so authorization is applied per
+  viewer. An image optimizer running on the server would fetch the avatar without
+  the viewer's cookie and could serve it to others, which would break `PRIVATE`
+  and `MEMBERS_ONLY` outright. The route sends `nosniff` and a restrictive
+  `Content-Security-Policy`, and the stored `Content-Type` is `image/webp`.
+- **Cross-origin mutations are refused.** The upload and delete routes are plain
+  POST/DELETE handlers, so they do not get the framework Origin check a Server
+  Action would. `Origin` is compared against the server-configured application
+  origin, taken from the same `BETTER_AUTH_URL` the auth boundary already trusts; a
+  missing or unparseable origin is refused rather than assumed same-origin, and a
+  request-supplied value can never satisfy the comparison.
+- **The filesystem adapter cannot reach production.** It is selected only when the
+  guarded end-to-end marker is present *and* `NODE_ENV` is not `production`. A stray
+  environment variable in a real deployment therefore falls through to the S3
+  adapter, which fails closed without configuration rather than writing to a
+  temporary directory. There is no production fallback to the filesystem.
+- **Credentials stay out of reach.** The S3 client is constructed lazily on first
+  use, so a build, typecheck, or unit test needs no credentials. Credentials are
+  supplied explicitly rather than picked up from the ambient environment, so the
+  adapter cannot silently fall back to an unrelated source such as an instance
+  role. No credential, endpoint, or bucket name is placed in a `NEXT_PUBLIC_*`
+  variable, and a configuration failure is reported as one fixed message that names nothing at all, not even the missing variable names.
+- **No raw provider or library error escapes.** Every S3 failure becomes a generic
+  `AvatarStorageOperationError`, every decode failure a generic
+  `AvatarUndecodableError`, and the routes map both onto fixed user-facing strings.
+  A missing object is treated as a normal outcome and stays indistinguishable from
+  any other unreadable avatar.
+- **No presigned URLs and no public bucket URL.** The browser receives only the
+  same-origin `/avatars/<token>` path, and the object is written with
+  `CacheControl: private, no-store`. The `.env.example` `S3_PUBLIC_BASE_URL` is
+  deliberately unused.
+
+Accepted and recorded rather than changed:
+
+- Database and object storage cannot share a transaction. The upload ordering
+  (store new, update the database, then delete the old object) means a crash
+  between the last two steps leaves an unreferenced object in the bucket. That
+  residual orphan is accepted because the alternative, deleting the old object
+  first, could leave a profile pointing at bytes that no longer exist. A periodic
+  reconciliation job is later operational work.
+- Conversely, a failed delete after a successful database update never reverts the
+  profile to the old avatar, and a failed cleanup on removal never restores the
+  reference. A leftover object that nothing points at is preferred over a
+  reachable avatar, so privacy state in the database always wins.
+- Upload is not rate limited. Each request requires an ACTIVE verified session,
+  accepts one file, is capped at 4 MiB, and is decoded and re-encoded server-side,
+  so the exposure is bounded, but repeated uploads remain a possible cost. The only
+  existing limiter is Better Auth's internal one, which owns the `RateLimit` table
+  and its key format; writing to it from application code risks colliding with auth
+  throttling, so a separate limiter is deferred rather than invented here.
+- The avatar GET route is a public HTTP surface, so it is the one route where
+  response timing could in principle differ between "denied" and "granted" (a
+  granted read performs an extra storage fetch). It reveals only whether the viewer
+  is already entitled to the resource.
 ## Accepted findings and residual risk
 
 Recorded deliberately rather than changed mechanically:

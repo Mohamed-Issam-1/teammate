@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -126,6 +126,14 @@ async function main(): Promise<void> {
   const capturePath = path.join(captureDirectory, "auth-email-capture.jsonl");
   writeFileSync(capturePath, "", "utf8");
 
+  // A second temp directory backs avatar uploads for this run. Avatar storage is
+  // S3-compatible in production and unreachable without credentials, so the run
+  // needs a local adapter instead. It is only reachable because the app process
+  // carries the end-to-end marker this runner already sets, and the adapter is
+  // refused outright in production.
+  const avatarDirectory = path.join(captureDirectory, "avatars");
+  mkdirSync(avatarDirectory, { recursive: true });
+
   let captureRemoved = false;
   function removeCaptureDirectory(): void {
     if (captureRemoved) {
@@ -164,6 +172,9 @@ async function main(): Promise<void> {
     BETTER_AUTH_SECRET: testSecret,
     [E2E_DATABASE_CONTEXT_ENV]: E2E_DATABASE_CONTEXT_VALUE,
     E2E_EMAIL_CAPTURE_PATH: capturePath,
+    // Avatars are written under the per-run temp directory and served back through
+    // the same authorized /avatars/[token] route a real deployment uses.
+    E2E_AVATAR_STORAGE_DIR: avatarDirectory,
     E2E_PORT,
     PORT: E2E_PORT,
     // Stripped so a developer's real credentials cannot reach the test app. This

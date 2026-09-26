@@ -11,6 +11,7 @@ import { ProfileNotOnboardedError } from "@/server/profiles/own-profile";
 
 const profileMock = vi.hoisted(() => ({
   getCurrentOwnProfile: vi.fn(),
+  getCurrentOwnAvatarUrl: vi.fn(),
   getCurrentSkillAssignments: vi.fn(),
   getCurrentInterestAssignments: vi.fn(),
   getCurrentTaxonomySkills: vi.fn(),
@@ -23,6 +24,9 @@ const navigationMock = vi.hoisted(() => ({
 
 vi.mock("@/server/profiles/current-profile", () => ({
   getCurrentOwnProfile: profileMock.getCurrentOwnProfile,
+}));
+vi.mock("@/server/avatars/current-avatar-read", () => ({
+  getCurrentOwnAvatarUrl: profileMock.getCurrentOwnAvatarUrl,
 }));
 vi.mock("@/server/profiles/current-assignments", () => ({
   getCurrentSkillAssignments: profileMock.getCurrentSkillAssignments,
@@ -76,6 +80,9 @@ function mockAll(rejection?: unknown) {
   profileMock.getCurrentTaxonomyInterests.mockImplementation(
     rejection ? resolved : () => Promise.resolve([]),
   );
+  profileMock.getCurrentOwnAvatarUrl.mockImplementation(
+    rejection ? resolved : () => Promise.resolve(null),
+  );
 }
 
 beforeEach(() => {
@@ -118,6 +125,7 @@ describe("profile page authorization", () => {
     profileMock.getCurrentInterestAssignments.mockResolvedValue([]);
     profileMock.getCurrentTaxonomySkills.mockResolvedValue([]);
     profileMock.getCurrentTaxonomyInterests.mockResolvedValue([]);
+    profileMock.getCurrentOwnAvatarUrl.mockResolvedValue(null);
 
     await expect(ProfilePage()).rejects.toThrow("NEXT_REDIRECT:/onboarding");
   });
@@ -163,6 +171,7 @@ describe("profile page authorization", () => {
         name: "Open source",
       },
     ]);
+    profileMock.getCurrentOwnAvatarUrl.mockResolvedValue(null);
 
     render(await ProfilePage());
 
@@ -186,6 +195,7 @@ describe("profile page authorization", () => {
     profileMock.getCurrentInterestAssignments.mockResolvedValue([]);
     profileMock.getCurrentTaxonomySkills.mockResolvedValue([]);
     profileMock.getCurrentTaxonomyInterests.mockResolvedValue([]);
+    profileMock.getCurrentOwnAvatarUrl.mockResolvedValue(null);
 
     render(await ProfilePage());
 

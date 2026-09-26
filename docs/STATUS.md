@@ -136,12 +136,14 @@ Reviewed and consciously accepted, with rationale recorded in
 
 ## In progress
 
-**Phase 2 — Profiles and taxonomy.** Four checkpoints are complete.
+**Phase 2 — Profiles and taxonomy.** Seven checkpoints are complete.
 
 *Schema and migration.* The `Profile` extensions, `Skill`, `UserSkill`,
 `Interest`, and `UserInterest` models exist as migration
 `20260926090638_phase2_profiles_and_taxonomy`, enforced by database constraint
-tests against real PostgreSQL.
+tests against real PostgreSQL. Migration `20260926210556_avatar_url_unique` adds
+the unique index on `Profile.avatarUrl`, so one non-null value maps to at most
+one profile.
 
 *Own profile read and edit.* `/app/profile` lets an onboarded user read and edit
 `displayName`, `headline`, `bio`, `availabilityHoursPerWeek`, `timezone`, and
@@ -185,20 +187,50 @@ deliberately no `yearsExperience`. The route is read-only, dynamically rendered,
 and carries static metadata. The owner sees the same safe projection there as
 anyone else; private data stays on `/app/profile`.
 
+*Avatar upload, storage, and authorized delivery.* A user can upload, replace, and
+remove **their own** avatar from a dedicated Avatar card on `/app/profile`.
+`Profile.avatarUrl` is TeamMate-owned and holds only `null` or a same-origin
+`/avatars/<opaque-token>` path, which is `@unique` in the database so one token
+resolves to at most one profile, and so no user-supplied URL, storage key, or bucket can
+ever reach it, and `User.image` is never synchronized. Uploads are capped at 4 MiB
+of original data, decoded server-side with libvips, and accepted only when the
+**decoded** format is JPEG, PNG, or WebP, which is what refuses SVG, GIF, and
+arbitrary data. The stored file is always a server-produced WebP, bounded to
+512x512 with no upscaling and with EXIF and other metadata stripped. Delivery goes
+through `/avatars/[token]`, which reuses the same target-eligibility and visibility
+policy as the public profile page, so an avatar is exactly as private as its
+profile and a leaked token is not authorization. Responses are `private, no-store`.
+Production uses S3-compatible storage configured through the existing `S3_*`
+prefix, with a lazily constructed client so a build or test needs no credentials;
+the guarded end-to-end run uses a temporary-directory adapter instead.
+
 Deferred and still open:
 
-- `avatarUrl` is server-owned and still has no write path. The public route
-  projects it but renders an initials placeholder, since there is no allowlisted
-  image host yet.
+- Live verification against a real S3-compatible provider is **deferred**, exactly
+  as live Resend verification was. No credentials were invented and nothing was
+  written to an unknown bucket; configuration parsing and adapter behavior are
+  covered by tests.
+- A small residual orphan can remain in the bucket if a process dies between the
+  database update and old-object cleanup, and a concurrent upload's losing object
+  is orphaned as well. **Periodic orphan reconciliation is deferred production
+  hardening.** A failing cleanup is not silent: each path emits one fixed
+  operational line, so a persistent failure is visible and is the signal that
+  reconciliation is needed.
+- Avatar upload is not yet rate limited. The request is bounded before any
+  expensive work, so one call cannot consume unbounded CPU or memory, but a caller
+  with a valid session can repeat uploads. Reusing Better Auth's internal limiter
+  from application code risks colliding with auth throttling over the `RateLimit`
+  table and its key format, so a separate limiter is deferred rather than invented
+  here. Recorded as residual hardening in `09_SECURITY.md`.
 - Public search, a member directory, and any profile discovery or indexing are
-  not built. The route is currently the only way to reach a profile.
+  still not built. The routes are the only way to reach a profile.
 - Taxonomy administration is a later phase.
 
 ## Next target
 
-The trusted avatar upload and storage boundary: a server-side upload path, an
-allowlisted object-storage host, and the `Profile.avatarUrl` write path that does
-not yet exist.
+The remaining Phase 2 hardening pass: reconcile orphaned avatar objects, apply
+upload rate limiting, and close the live external storage verification. After
+that, Phase 3 project and discovery work begins.
 ## Open decisions
 
 - Production managed PostgreSQL vendor.

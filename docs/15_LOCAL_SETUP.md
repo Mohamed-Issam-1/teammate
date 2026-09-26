@@ -141,6 +141,29 @@ Dependency audit (blocking at `--audit-level=high`; CI runs the same check):
 npm audit --audit-level=high
 ```
 
+## Avatar storage
+
+Avatars are optional for local development. The S3-compatible client is created
+lazily, so an empty configuration does not break a build, a typecheck, or the unit
+tests. If you want to exercise a real upload locally, fill in the `S3_*` values in
+`.env` from `.env.example`; avatar operations fail closed with a safe message when
+they are missing.
+
+A local MinIO-style endpoint over `http://` is accepted, but only when `NODE_ENV`
+is exactly `development` or `test`. The rule is an allow-list rather than a
+production check, so a missing, empty, or misspelled `NODE_ENV` denies plaintext
+rather than permitting it. Leave `S3_ENDPOINT` unset to use real AWS, which
+requires no endpoint at all.
+
+The end-to-end suite does **not** need object storage. The guarded runner points the
+application at a temporary directory for the duration of the run and removes it
+afterwards, and avatars are still served back through the real `/avatars/<token>`
+route with the real authorization, so the browser tests exercise the production
+code path.
+
+Live verification against a real S3-compatible provider has not been performed. No
+credentials were created for it, and nothing was written to an unknown bucket; see
+`09_SECURITY.md` and `STATUS.md`.
 ## Starter taxonomy
 
 The skills and interests offered in profile editing come from a curated,

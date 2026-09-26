@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { SignOutButton } from "@/features/auth/components/sign-out-button";
+import { AvatarCard } from "@/features/profile/components/avatar-card";
 import { InterestsSection } from "@/features/profile/components/interests-section";
 import { ProfileForm } from "@/features/profile/components/profile-form";
 import { SkillsSection } from "@/features/profile/components/skills-section";
@@ -15,6 +16,7 @@ import {
   getCurrentSkillAssignments,
 } from "@/server/profiles/current-assignments";
 import { getCurrentOwnProfile } from "@/server/profiles/current-profile";
+import { getCurrentOwnAvatarUrl } from "@/server/avatars/current-avatar-read";
 import { ProfileNotOnboardedError } from "@/server/profiles/own-profile";
 import { AssignmentNotOnboardedError } from "@/server/profiles/assignments";
 import {
@@ -40,18 +42,21 @@ export default async function ProfilePage() {
   let interestAssignments: Awaited<
     ReturnType<typeof getCurrentInterestAssignments>
   >;
+  let ownAvatarUrl: string | null = null;
   let skillTaxonomy: Awaited<ReturnType<typeof getCurrentTaxonomySkills>>;
   let interestTaxonomy: Awaited<ReturnType<typeof getCurrentTaxonomyInterests>>;
 
   try {
     [
       profile,
+      ownAvatarUrl,
       skillAssignments,
       interestAssignments,
       skillTaxonomy,
       interestTaxonomy,
     ] = await Promise.all([
       getCurrentOwnProfile(),
+      getCurrentOwnAvatarUrl(),
       getCurrentSkillAssignments(),
       getCurrentInterestAssignments(),
       getCurrentTaxonomySkills(),
@@ -110,6 +115,11 @@ export default async function ProfilePage() {
               <SignOutButton />
             </CardContent>
           </Card>
+
+          <AvatarCard
+            avatarUrl={ownAvatarUrl}
+            displayName={profile.displayName}
+          />
 
           <SkillsSection
             assignments={skillAssignments}

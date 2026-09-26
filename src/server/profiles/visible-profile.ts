@@ -1,7 +1,9 @@
 import "server-only";
 
 import type { PrismaClient } from "@/generated/prisma/client";
+import { parseAvatarTokenFromUrl } from "@/server/avatars/token";
 import { compareByCategoryThenName } from "@/server/taxonomy/ordering";
+import { isProfileVisibleTo, visibilityTargetSelect } from "./visibility";
 import type { ProfileViewer } from "./current-viewer";
 
 /**
@@ -96,48 +98,6 @@ export function isValidProfileLocator(value: string): boolean {
 }
 
 /**
- * Target eligibility.
- *
- * A profile is only viewable if the account behind it is ACTIVE, email-verified,
- * and finished onboarding. Any failure is indistinguishable from the user not
- * existing, so a suspended or half-set-up account is never exposed and its state
- * is never revealed.
- */
-function isEligibleTarget(target: {
-  accountStatus: string;
-  emailVerified: boolean;
-  profile: { onboardingCompletedAt: Date | null } | null;
-}): boolean {
-  return (
-    target.accountStatus === "ACTIVE" &&
-    target.emailVerified === true &&
-    target.profile !== null &&
-    target.profile.onboardingCompletedAt !== null
-  );
-}
-
-/** Whether the viewer may see a target with the given visibility. */
-function isVisibleTo(
-  profileVisibility: "PRIVATE" | "MEMBERS_ONLY" | "PUBLIC",
-  viewer: ProfileViewer,
-  isOwner: boolean,
-): boolean {
-  if (isOwner) {
-    return true;
-  }
-
-  if (profileVisibility === "PUBLIC") {
-    return true;
-  }
-
-  if (profileVisibility === "MEMBERS_ONLY") {
-    return viewer.kind === "member";
-  }
-
-  return false;
-}
-
-/**
  * Resolve the profile a viewer may see, or `null` when they may not.
  *
  * Two phases on purpose. The first query fetches the minimum needed to decide
@@ -157,31 +117,10 @@ export async function readVisibleProfile(
 
   const target = await database.user.findUnique({
     where: { id: locator },
-    select: {
-      accountStatus: true,
-      emailVerified: true,
-      profile: {
-        select: {
-          profileVisibility: true,
-          onboardingCompletedAt: true,
-        },
-      },
-    },
+    select: visibilityTargetSelect,
   });
 
-  if (target === null || !isEligibleTarget(target)) {
-    return null;
-  }
-
-  // `isEligibleTarget` already established the relation is present.
-  const visibility = target.profile?.profileVisibility;
-  if (visibility === undefined) {
-    return null;
-  }
-
-  const isOwner = viewer.kind === "member" && viewer.userId === locator;
-
-  if (!isVisibleTo(visibility, viewer, isOwner)) {
+  if (target === null || !isProfileVisibleTo(target, viewer, locator)) {
     return null;
   }
 
@@ -221,7 +160,15 @@ export async function readVisibleProfile(
     displayName: profile.profile.displayName,
     headline: profile.profile.headline,
     bio: profile.profile.bio,
-    avatarUrl: profile.profile.avatarUrl,
+    // Re-validated at the read boundary, not trusted from the column. The write
+    // path only ever stores a canonical path, but re-parsing here means a legacy
+    // value, a bad data fix, or any future writer cannot turn this into an
+    // arbitrary `src` on a page other members load. An unrecognized value becomes
+    // "no avatar" and the UI falls back to initials.
+    avatarUrl:
+      parseAvatarTokenFromUrl(profile.profile.avatarUrl) === null
+        ? null
+        : profile.profile.avatarUrl,
     skills: profile.userSkills
       .map((entry) => ({
         slug: entry.skill.slug,
