@@ -141,6 +141,24 @@ Dependency audit (blocking at `--audit-level=high`; CI runs the same check):
 npm audit --audit-level=high
 ```
 
+## Starter taxonomy
+
+The skills and interests offered in profile editing come from a curated,
+system-managed set. Install it once with:
+
+```powershell
+npm run seed:taxonomy
+```
+
+The command is safe to run repeatedly. It only inserts entries that are missing,
+never updates or deletes an existing entry, and never touches user assignments.
+If an existing entry disagrees with the starter set it stops and reports the
+conflict rather than rewriting it. It prints the target database name so you can
+confirm where it ran; the connection string is never printed.
+
+Taxonomy is system-managed: there is no application screen or API for creating,
+renaming, or deleting a skill or interest.
+
 ## Playwright
 
 Install the browser once, then run the end-to-end suite. It boots the real

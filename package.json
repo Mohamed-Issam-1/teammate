@@ -16,6 +16,7 @@
     "test:watch": "vitest",
     "test:e2e": "tsx scripts/run-e2e-tests.ts",
     "db:check": "tsx scripts/db-check.ts",
+    "seed:taxonomy": "tsx scripts/seed-taxonomy.ts",
     "postinstall": "prisma generate",
     "format": "prettier --write .",
     "format:check": "prettier --check .",

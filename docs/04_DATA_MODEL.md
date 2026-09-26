@@ -113,16 +113,69 @@ and are not part of the taxonomy design.
 
 ## Taxonomy invariants
 
-- Taxonomy is system-managed. No application surface may create, rename, or
-  delete a `Skill` or `Interest` row.
+- Taxonomy is system-managed. No application surface — server action, route, or
+  API — lets an ordinary user create, rename, recategorize, or delete a `Skill`
+  or `Interest`. Ordinary users may read the taxonomy and, in a later checkpoint,
+  assign existing entries to themselves. Admin management is a later phase.
 - `name` uniqueness is case-sensitive under the default PostgreSQL collation.
   The `nameKey` unique constraint is what prevents `React` and `react` from
   coexisting, and only when both rows store the same normalized key.
-- The database performs no normalization. Deriving `nameKey` and `slug` is a
-  server-side responsibility, and the normalization contract is not yet
-  implemented.
+- The database performs no normalization. Deriving `nameKey` and validating
+  `slug` is a server-side responsibility.
 - Deleting a user cascades to their join rows only. Shared taxonomy rows are
   never deleted as a side effect.
+
+### Normalization contract
+
+`nameKey` is derived, never hand-written, in this exact order:
+
+1. Unicode NFC normalization;
+2. trim leading and trailing whitespace;
+3. collapse internal whitespace runs to a single ASCII space;
+4. lowercase.
+
+This is deterministic lowercase normalization only. It is **not** Unicode full
+case folding, **not** homoglyph or confusable detection, and **not** fuzzy
+matching or semantic aliasing. A Cyrillic homoglyph is not folded onto its Latin
+counterpart. `React` and `react` produce the same key; `React` and `React.js`
+remain distinct.
+
+### Slug contract
+
+Slugs are curated explicitly and are never derived from a display name, so
+`C++` maps to the curated `cpp`. The grammar is
+`^[a-z0-9]+(?:-[a-z0-9]+)*$`: lowercase alphanumeric groups joined by single
+hyphens. Uppercase, underscores, repeated hyphens, leading or trailing hyphens,
+whitespace, and non-ASCII characters are all rejected. Display names themselves
+may contain Unicode. No transliteration dependency is used.
+
+### Starter taxonomy
+
+The starter taxonomy is **product-owned seed content** authored for this
+repository and approved as the Phase 2 baseline. It is not derived from, and does
+not claim to represent, any external standards body or third-party ontology.
+
+`npm run seed:taxonomy` inserts the curated starter set. It is safe to run
+repeatedly: it only inserts rows that are missing, never updates or deletes an
+existing taxonomy row, and never touches `UserSkill` or `UserInterest`. If
+existing rows disagree with the starter set on `slug`, `name`, or `nameKey`, the
+command fails closed and reports the conflict instead of rewriting data. A row
+whose name and key agree but whose category differs is left untouched. The
+command targets the database named by `DATABASE_URL`, and never migrates,
+resets, pushes, or drops anything.
+
+### Presentation ordering
+
+Skills are listed by category then name; interests by name. A null skill category
+sorts last. No order column exists in the database.
+
+### Read projection
+
+The read boundaries return only `id`, `slug`, `name`, and `category` for skills,
+and `id`, `slug`, and `name` for interests. `nameKey` is never exposed, and no
+Prisma row is passed to a client wholesale. Reads require an ACTIVE and verified
+session, because in Phase 2 they exist only to back authenticated profile
+editing.
 
 ## Projects
 

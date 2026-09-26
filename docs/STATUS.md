@@ -145,28 +145,33 @@ tests against real PostgreSQL.
 
 *Own profile read and edit.* `/app/profile` lets an onboarded user read and edit
 `displayName`, `headline`, `bio`, `availabilityHoursPerWeek`, `timezone`, and
-`profileVisibility`. All validation is server-side and authoritative. No taxonomy
-service, normalization runtime, or seed data exists yet.
+`profileVisibility`. All validation is server-side and authoritative.
+
+*Taxonomy foundation.* Taxonomy is system-managed: no application surface lets an
+ordinary user create, rename, recategorize, or delete a taxonomy row. A pure
+normalization module derives `nameKey` (NFC, trim, collapse whitespace,
+lowercase) and validates a curated slug grammar. `npm run seed:taxonomy` inserts
+the product-owned starter set — 32 skills and 15 interests — and is idempotent,
+non-destructive, and fail-closed on conflict. Read-only, session-scoped list
+boundaries exist for future selection UI, with no write path.
 
 Deferred and still open:
 
-- A curated Skill/Interest taxonomy list and its source must be approved before
-  any taxonomy-selection UI is built. This is tracked as its own approval
-  checkpoint. Taxonomy must not be opened to user creation to work around it.
-- `UserSkill.yearsExperience` has no server-side validation range yet. It must be
-  resolved before any profile-skill write path is implemented.
+- Skill and interest assignment to a user's own profile, including proficiency
+  and `yearsExperience`. `yearsExperience` is an optional integer validated at
+  **0..100 inclusive** as an application rule; that range is decided but not yet
+  implemented, and no database CHECK constraint is added.
 - The public profile route and its URL shape are deferred. `profileVisibility`
   is stored and editable but nothing reads it yet, so it currently exposes
   nothing; the public-profile reader must filter on it rather than assume the
   write path protected it.
 - `avatarUrl` is server-owned and has no write path until the trusted
   upload/storage checkpoint.
-- The runtime `nameKey`/`slug` normalization contract is not implemented; the
-  database stores whatever it is given.
+- Taxonomy administration is a later phase.
 
 ## Next target
 
-Taxonomy assignment, after the taxonomy seed decision.
+Skill and interest assignment for the authenticated user's own profile.
 
 ## Open decisions
 
