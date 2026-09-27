@@ -9,6 +9,7 @@ export default defineConfig({
     fileParallelism: false,
     hookTimeout: 30_000,
     testTimeout: 30_000,
+    globalSetup: ["./tests/integration/global-setup.ts"],
   },
   resolve: {
     alias: {

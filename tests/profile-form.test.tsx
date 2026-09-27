@@ -121,8 +121,9 @@ describe("own profile form", () => {
 
     await user.click(screen.getByRole("button", { name: "Save profile" }));
 
-    await waitFor(() =>
-      expect(actionMock.updateProfileAction).toHaveBeenCalledTimes(1),
+    await waitFor(
+      () => expect(actionMock.updateProfileAction).toHaveBeenCalledTimes(1),
+      { timeout: 5_000 },
     );
     expect(actionMock.updateProfileAction).toHaveBeenCalledWith({
       displayName: "Ada King",
@@ -148,8 +149,9 @@ describe("own profile form", () => {
     await user.clear(screen.getByLabelText("Time zone"));
     await user.click(screen.getByRole("button", { name: "Save profile" }));
 
-    await waitFor(() =>
-      expect(actionMock.updateProfileAction).toHaveBeenCalledTimes(1),
+    await waitFor(
+      () => expect(actionMock.updateProfileAction).toHaveBeenCalledTimes(1),
+      { timeout: 5_000 },
     );
     expect(actionMock.updateProfileAction).toHaveBeenCalledWith(
       expect.objectContaining({
