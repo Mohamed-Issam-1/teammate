@@ -52,6 +52,10 @@ Exit criteria:
 
 ## Phase 2 — Profiles and taxonomy
 
+Status: **code complete**. Hosted CI green. 793 unit, 232 integration, 45 E2E
+passing. Deferred items: live S3/Resend external verification, avatar orphan
+reconciliation, upload rate limiting, profile search (Phase 3).
+
 Deliver:
 - profile edit/public profile;
 - skills/interests;

@@ -2,12 +2,13 @@
 
 ## Current phase
 
-**Phase 1 — Authentication and onboarding**
+**Phase 2 — Profiles and taxonomy**
 
-Status: Phase 1 code complete. All local quality gates pass, hosted GitHub
+Status: Phase 2 code complete. All local quality gates pass, hosted GitHub
 Actions CI is green on `main`, and the PostgreSQL integration and Playwright
-end-to-end suites pass locally. Live production email delivery remains externally
-unverified (see "External configuration still pending").
+end-to-end suites pass locally. Live production email delivery and S3-compatible
+avatar storage remain externally unverified (see "External configuration still
+pending").
 
 ## Completed
 
@@ -134,9 +135,13 @@ Reviewed and consciously accepted, with rationale recorded in
 - E2E runs share the repository `.next/` directory with `npm run dev`.
 - E2E is a local gate and is not part of hosted CI; see `10_TESTING.md` for why.
 
-## In progress
+### Phase 2 — Profiles and taxonomy
 
-**Phase 2 — Profiles and taxonomy.** Seven checkpoints are complete.
+**Status: COMPLETE.** Seven checkpoints plus closure stabilization are complete.
+All local quality gates pass, hosted CI is green, and the PostgreSQL integration
+and Playwright end-to-end suites pass locally. Live production email delivery
+and S3-compatible avatar storage remain externally unverified (see "External
+configuration still pending").
 
 *Schema and migration.* The `Profile` extensions, `Skill`, `UserSkill`,
 `Interest`, and `UserInterest` models exist as migration
@@ -226,11 +231,20 @@ Deferred and still open:
   still not built. The routes are the only way to reach a profile.
 - Taxonomy administration is a later phase.
 
+## Closure notes
+
+**Location.** The Source of Truth wording is "timezone/location text where
+needed" — descriptive and optional. The SRS does not list location as a profile
+requirement, and the Data Model defines no location column. Phase 2 closes
+without a persisted location field.
+
+**Profile search eligibility.** Phase 2 provides the profile data and visibility
+semantics required for future search. Actual people/profile search and discovery
+belongs to Phase 3.
+
 ## Next target
 
-The remaining Phase 2 hardening pass: reconcile orphaned avatar objects, apply
-upload rate limiting, and close the live external storage verification. After
-that, Phase 3 project and discovery work begins.
+Phase 3 — Projects and discovery.
 ## Open decisions
 
 - Production managed PostgreSQL vendor.
