@@ -2,13 +2,31 @@
 
 ## Current phase
 
-**Phase 2 — Profiles and taxonomy**
+**Phase 3 — Projects and discovery**
 
-Status: Phase 2 code complete. All local quality gates pass, hosted GitHub
-Actions CI is green on `main`, and the PostgreSQL integration and Playwright
-end-to-end suites pass locally. Live production email delivery and S3-compatible
-avatar storage remain externally unverified (see "External configuration still
-pending").
+Status: Phase 3 Checkpoint 1 (final design decisions) frozen. No Phase 3 code
+exists. Awaiting review before implementation. Phase 2 remains closed.
+
+## Phase 3 design (Checkpoint 1)
+
+**Status: Design decisions frozen; no implementation.**
+
+Phase 3 Checkpoint 1 freezes the following design decisions:
+
+- **Project model:** `id`, `ownerId`, `title`, `summary`, `description`, `visibility`, `status`, `desiredTeamSize`, `expectedHoursPerWeek`, `createdAt`, `updatedAt`, `archivedAt`. No `slug`. No category. No generic tags. No deadline/start/end. No location/remote/timezone.
+- **Project visibility:** `PUBLIC`, `PRIVATE`. Default `PRIVATE`. Independent from `Profile.profileVisibility`.
+- **Project status:** `DRAFT`, `OPEN`, `IN_PROGRESS`, `COMPLETED`, `ARCHIVED`. Default `DRAFT`.
+- **Allowed transitions:** `DRAFT→OPEN`, `DRAFT→ARCHIVED`, `OPEN→IN_PROGRESS`, `OPEN→ARCHIVED`, `IN_PROGRESS→COMPLETED`, `IN_PROGRESS→ARCHIVED`, `COMPLETED→ARCHIVED`. No reopen/unarchive.
+- **Ownership:** Creator automatically becomes owner. `ownerId` from session only. No create/edit action accepts `ownerId`/`userId` from client.
+- **Authorization:** Only `OWNER` role in Phase 3. No `MANAGER`/`MEMBER` roles yet. Owner-only mutations.
+- **Read semantics:** Owner may view in every status. Non-owner/anonymous: `DRAFT` and `ARCHIVED` not visible. `OPEN`/`IN_PROGRESS`/`COMPLETED` visible if `PUBLIC`, not visible if `PRIVATE`.
+- **Discovery:** Only `PUBLIC` + status in (`OPEN`, `IN_PROGRESS`, `COMPLETED`). `DRAFT` and `ARCHIVED` never leak through discovery.
+- **Indistinguishable not-found:** Inaccessible and nonexistent project detail use identical not-found behavior.
+- **Required skills:** `ProjectRequiredSkill` with `projectId`, `skillId`, `importance` (integer 1–5; UI default 3), `minimumProficiency` (optional, reuses `ProficiencyLevel` enum). Unique `(projectId, skillId)`. Cascade on project delete, restrict on skill delete.
+- **Interests:** `ProjectInterest` with `projectId`, `interestId`. Unique `(projectId, interestId)`. Cascade on project delete, restrict on interest delete.
+- **Owner FK:** `Project.ownerId → User.id` uses `RESTRICT` (not cascade).
+- **Text validation:** `title` 3–120, `summary` 10–300, `description` 20–10,000 characters. Reject dangerous control characters. No `dangerouslySetInnerHTML`.
+- **Deferred items:** avatar orphan reconciliation, avatar upload rate limiting, live S3/Resend external verification (Phase 2 carryover), profile/member search and discovery (Phase 3 CP6), taxonomy administration (later phase).
 
 ## Completed
 
@@ -244,7 +262,7 @@ belongs to Phase 3.
 
 ## Next target
 
-Phase 3 — Projects and discovery.
+Phase 3 Checkpoint 2: Project schema + migration #4.
 ## Open decisions
 
 - Production managed PostgreSQL vendor.
