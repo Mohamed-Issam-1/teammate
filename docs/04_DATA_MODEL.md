@@ -448,31 +448,40 @@ parser only recognizes the exact TeamMate avatar route.
 ## Projects
 
 `Project`
-- id
-- ownerId
+- id (`@default(uuid())`)
+- ownerId (FK → User.id, `ON DELETE RESTRICT`)
 - title
-- slug or public identifier
 - summary
 - description
-- visibility
-- status
+- visibility (`ProjectVisibility` enum: `PUBLIC`/`PRIVATE`, default `PRIVATE`)
+- status (`ProjectStatus` enum: `DRAFT`/`OPEN`/`IN_PROGRESS`/`COMPLETED`/`ARCHIVED`, default `DRAFT`)
 - desiredTeamSize
 - expectedHoursPerWeek optional
-- createdAt / updatedAt / archivedAt optional
+- createdAt (required, default now())
+- updatedAt (required, @updatedAt)
+- archivedAt optional / nullable
 
-Indexes should support owner, status, visibility, createdAt.
+No slug. No category. No generic Tag model / no separate generic tags; interests use ProjectInterest. No deadline/start/end. No location/remote/timezone.
+The opaque `Project.id` is the route locator.
+
+Indexes: `(ownerId, createdAt)` for owner project lists; `(visibility, status, createdAt)`
+for public discovery.
 
 `ProjectRequiredSkill`
-- projectId
-- skillId
-- importance/weight
-- minimumProficiency optional
-- unique pair
+- projectId (FK → Project.id, `ON DELETE CASCADE`)
+- skillId (FK → Skill.id, `ON DELETE RESTRICT`)
+- importance (integer, application range 1–5, no database default)
+- minimumProficiency optional (`ProficiencyLevel` enum)
+- unique(projectId, skillId)
+- index(skillId)
 
 `ProjectInterest`
-- projectId
-- interestId
-- unique pair
+- projectId (FK → Project.id, `ON DELETE CASCADE`)
+- interestId (FK → Interest.id, `ON DELETE RESTRICT`)
+- unique(projectId, interestId)
+- index(interestId)
+
+Migration: `20260927172138_phase3_projects_and_discovery`.
 
 ## Membership
 

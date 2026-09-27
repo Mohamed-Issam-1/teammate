@@ -27,6 +27,7 @@ model User {
   profile       Profile?
   userSkills    UserSkill[]
   userInterests UserInterest[]
+  projects      Project[]
 
   @@unique([email])
   @@map("user")
@@ -103,6 +104,19 @@ enum ProficiencyLevel {
   EXPERT
 }
 
+enum ProjectVisibility {
+  PUBLIC
+  PRIVATE
+}
+
+enum ProjectStatus {
+  DRAFT
+  OPEN
+  IN_PROGRESS
+  COMPLETED
+  ARCHIVED
+}
+
 model Profile {
   userId                   String            @id
   displayName              String
@@ -127,6 +141,7 @@ model Skill {
   nameKey  String      @unique
   category String?
   users    UserSkill[]
+  projectRequiredSkills ProjectRequiredSkill[]
 
   @@map("Skill")
 }
@@ -150,6 +165,7 @@ model Interest {
   nameKey String         @unique
   name    String
   users   UserInterest[]
+  projectInterests ProjectInterest[]
 
   @@map("Interest")
 }
@@ -163,4 +179,50 @@ model UserInterest {
   @@unique([userId, interestId])
   @@index([interestId])
   @@map("UserInterest")
+}
+
+model Project {
+  id                  String             @id @default(uuid())
+  ownerId             String
+  title               String
+  summary             String
+  description         String
+  visibility          ProjectVisibility  @default(PRIVATE)
+  status              ProjectStatus      @default(DRAFT)
+  desiredTeamSize     Int
+  expectedHoursPerWeek Int?
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
+  archivedAt          DateTime?
+  owner               User               @relation(fields: [ownerId], references: [id], onDelete: Restrict)
+  requiredSkills      ProjectRequiredSkill[]
+  projectInterests    ProjectInterest[]
+
+  @@index([ownerId, createdAt])
+  @@index([visibility, status, createdAt])
+  @@map("Project")
+}
+
+model ProjectRequiredSkill {
+  projectId          String
+  skillId           String
+  importance        Int
+  minimumProficiency ProficiencyLevel?
+  project           Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  skill             Skill    @relation(fields: [skillId], references: [id], onDelete: Restrict)
+
+  @@unique([projectId, skillId])
+  @@index([skillId])
+  @@map("ProjectRequiredSkill")
+}
+
+model ProjectInterest {
+  projectId  String
+  interestId String
+  project    Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  interest   Interest @relation(fields: [interestId], references: [id], onDelete: Restrict)
+
+  @@unique([projectId, interestId])
+  @@index([interestId])
+  @@map("ProjectInterest")
 }

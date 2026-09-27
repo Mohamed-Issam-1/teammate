@@ -4,8 +4,8 @@
 
 **Phase 3 — Projects and discovery**
 
-Status: Phase 3 Checkpoint 1 (final design decisions) frozen. No Phase 3 code
-exists. Awaiting review before implementation. Phase 2 remains closed.
+Status: Phase 3 Checkpoint 2 (project schema + migration #4) implemented and
+tested. Awaiting schema/migration review. Phase 2 remains closed.
 
 ## Phase 3 design (Checkpoint 1)
 
@@ -27,6 +27,44 @@ Phase 3 Checkpoint 1 freezes the following design decisions:
 - **Owner FK:** `Project.ownerId → User.id` uses `RESTRICT` (not cascade).
 - **Text validation:** `title` 3–120, `summary` 10–300, `description` 20–10,000 characters. Reject dangerous control characters. No `dangerouslySetInnerHTML`.
 - **Deferred items:** avatar orphan reconciliation, avatar upload rate limiting, live S3/Resend external verification (Phase 2 carryover), profile/member search and discovery (Phase 3 CP6), taxonomy administration (later phase).
+
+## Phase 3 Checkpoint 2 (schema + migration)
+
+**Status: Implemented and tested. Awaiting review.**
+
+Phase 3 Checkpoint 2 delivers the project data foundation only — no UI, no
+routes, no server actions, no lifecycle logic, no discovery.
+
+*Schema.* `Project`, `ProjectRequiredSkill`, and `ProjectInterest` models plus
+the `ProjectVisibility` (`PUBLIC`/`PRIVATE`, default `PRIVATE`) and
+`ProjectStatus` (`DRAFT`/`OPEN`/`IN_PROGRESS`/`COMPLETED`/`ARCHIVED`, default
+`DRAFT`) enums exist as migration `20260927172138_phase3_projects_and_discovery`.
+`Project.ownerId → User.id` uses `ON DELETE RESTRICT`. `ProjectRequiredSkill`
+and `ProjectInterest` cascade on project delete and restrict on taxonomy delete.
+`importance` is a plain integer with no database default; `minimumProficiency`
+is optional and reuses `ProficiencyLevel`. No `slug`, no category, no tags, no
+deadline/location/timezone, no membership/application/invitation entities.
+
+*Indexes.* `Project(ownerId, createdAt)` supports owner project lists.
+`Project(visibility, status, createdAt)` supports public discovery.
+`ProjectRequiredSkill(skillId)` and `ProjectInterest(interestId)` support
+skill/interest-filtered discovery. The composite unique constraints on
+`(projectId, skillId)` and `(projectId, interestId)` already cover project-first
+lookups.
+
+*Validation boundary.* `desiredTeamSize` (2–50), `expectedHoursPerWeek` (1–168),
+and `importance` (1–5) are application-level Zod contracts enforced in CP3/CP4.
+No database CHECK constraints exist for them.
+
+*archivedAt.* Nullable, defaults null. Lifecycle invariant (non-ARCHIVED → null,
+entering ARCHIVED → set) is CP4 application logic. No DB trigger or constraint.
+
+*Testing.* 28 new PostgreSQL integration tests in
+`tests/integration/project-schema.integration.test.ts` cover creation defaults,
+enum values, FK enforcement, cascade/restrict behavior, uniqueness, and
+nullability. Guarded cleanup in `fixtures.ts` and `global-setup.ts` extended
+with the three new tables in FK-safe order. Full integration suite: 260 passed.
+Full unit suite: 793 passed. Lint, typecheck, format, and build all pass.
 
 ## Completed
 
@@ -262,7 +300,7 @@ belongs to Phase 3.
 
 ## Next target
 
-Phase 3 Checkpoint 2: Project schema + migration #4.
+Phase 3 Checkpoint 3: Project create/edit + required Skills/Interests.
 ## Open decisions
 
 - Production managed PostgreSQL vendor.
